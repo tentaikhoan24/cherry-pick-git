@@ -391,20 +391,23 @@
   }
 
   // ── Mount ──────────────────────────────────────────────────────
-  onMount(async () => {
-    const p = new URLSearchParams(window.location.search);
-    repo = p.get("repo") ?? "";
-    file = p.get("file") ?? "";
-    if (!repo || !file) { loading = false; error = "Missing parameters"; return; }
-    try { const s = await rpc.settings.load(); document.body.classList.toggle("light", s.theme === "light"); } catch { /* ignore */ }
-    try {
-      const r = await rpc.git.fileContent(repo, file);
-      const parsed = parse(r.content);
-      parts = parsed.parts;
-      mergedText = parsed.initial;
-    } catch (e) { error = String(e); }
-    loading = false;
-    setTimeout(() => scrollToConflict(0), 120);
+  onMount(() => {
+    // Async init — fire and forget so cleanup function can be returned synchronously.
+    (async () => {
+      const p = new URLSearchParams(window.location.search);
+      repo = p.get("repo") ?? "";
+      file = p.get("file") ?? "";
+      if (!repo || !file) { loading = false; error = "Missing parameters"; return; }
+      try { const s = await rpc.settings.load(); document.body.classList.toggle("light", s.theme === "light"); } catch { /* ignore */ }
+      try {
+        const r = await rpc.git.fileContent(repo, file);
+        const parsed = parse(r.content);
+        parts = parsed.parts;
+        mergedText = parsed.initial;
+      } catch (e) { error = String(e); }
+      loading = false;
+      setTimeout(() => scrollToConflict(0), 120);
+    })();
 
     function onGlobalUp() { draggingSide = null; resizingH = false; }
     function onGlobalMove(e: MouseEvent) {

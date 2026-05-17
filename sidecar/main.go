@@ -299,6 +299,46 @@ func registerHandlers(s *rpc.Server) {
 		}
 		return r.ContinueCherry(ctx, struct{}{})
 	}))
+
+	// M8 — external tool support
+	s.Register("git.extractDiffFiles", wrap1(func(ctx context.Context, p struct {
+		Repo string `json:"repo"`
+		git.ExtractDiffFilesArgs
+	}) (any, error) {
+		r, err := git.Open(ctx, p.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return r.ExtractDiffFiles(ctx, p.ExtractDiffFilesArgs)
+	}))
+
+	s.Register("git.extractConflictFiles", wrap1(func(ctx context.Context, p struct {
+		Repo string `json:"repo"`
+		git.ExtractConflictFilesArgs
+	}) (any, error) {
+		r, err := git.Open(ctx, p.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return r.ExtractConflictFiles(ctx, p.ExtractConflictFilesArgs)
+	}))
+
+	s.Register("git.stageResolvedFile", wrap1(func(ctx context.Context, p struct {
+		Repo string `json:"repo"`
+		git.StageResolvedFileArgs
+	}) (any, error) {
+		r, err := git.Open(ctx, p.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return r.StageResolvedFile(ctx, p.StageResolvedFileArgs)
+	}))
+
+	s.Register("git.cleanupTmpDir", wrap1(func(ctx context.Context, p struct {
+		git.CleanupTmpDirArgs
+	}) (any, error) {
+		return git.CleanupTmpDir(ctx, p.CleanupTmpDirArgs)
+	}))
 }
 
 // wrap1 reduces boilerplate for handlers that take a single typed params

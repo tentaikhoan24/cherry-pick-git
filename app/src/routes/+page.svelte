@@ -1,6 +1,7 @@
 <script lang="ts">
   import { rpc, RpcCallError } from "$lib/rpc";
   import type { Branch, Commit, CommitFilter, CherryPickResult, CherryPickProgress, RecentRepo, CommitDetail, CommitFile, DryRunItem, ConflictFileInfo, AppSettings } from "$lib/rpc-types";
+  import { invoke } from "@tauri-apps/api/core";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
   import Toolbar from "$lib/Toolbar.svelte";
@@ -14,7 +15,11 @@
   import GitConsole from "$lib/GitConsole.svelte";
 
   // ── settings ──────────────────────────────────────────────
-  const DEFAULT_SETTINGS: AppSettings = { maxCommits: 100, defaultApplyMode: "apply", showEolMarkers: false, autoFetchOnOpen: false, theme: "dark" };
+  const DEFAULT_SETTINGS: AppSettings = {
+    maxCommits: 100, defaultApplyMode: "apply", showEolMarkers: false, autoFetchOnOpen: false, theme: "dark",
+    externalDiffEnabled: false, externalDiffPath: "", externalDiffArgs: "",
+    externalMergeEnabled: false, externalMergePath: "", externalMergeArgs: "",
+  };
   let settings = $state<AppSettings>(DEFAULT_SETTINGS);
   let settingsOpen = $state(false);
   let consoleOpen = $state(false);
@@ -198,8 +203,30 @@
     }
   }
 
-  function viewConflictFile(file: string) {
+  async function viewConflictFile(file: string) {
     if (!repoPath) return;
+
+    if (settings.externalMergeEnabled && settings.externalMergePath) {
+      conflictBusy = true;
+      try {
+        const res = await rpc.git.extractConflictFiles(repoPath, file);
+        const template = settings.externalMergeArgs || '"{theirs}" "{ours}" "{base}" "{output}"';
+        const args = buildArgs(template, {
+          base: res.basePath, ours: res.oursPath,
+          theirs: res.theirsPath, output: res.outputPath,
+        });
+        await invoke("launch_and_wait", { program: settings.externalMergePath, args });
+        await rpc.git.stageResolvedFile(repoPath, file, res.outputPath);
+        await rpc.git.cleanupTmpDir(res.tmpDir);
+        resolvedSet = new Set([...resolvedSet, file]);
+      } catch (e) {
+        applyError = e instanceof RpcCallError ? e.rpcError.message : String(e);
+      } finally {
+        conflictBusy = false;
+      }
+      return;
+    }
+
     const params = new URLSearchParams({ repo: repoPath, file });
     new WebviewWindow(`conflict-${Date.now()}`, {
       url: `${window.location.origin}/conflict?${params}`,
@@ -265,12 +292,45 @@
     }
   }
 
+  // ── external tool helpers ─────────────────────────────────
+
+  // Parse an args template with {placeholder} substitution into a string[].
+  function buildArgs(template: string, vars: Record<string, string>): string[] {
+    let s = template;
+    for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, v);
+    const result: string[] = [];
+    // Match prefix+"quoted value" (e.g. /path:"C:\some path\file") as ONE arg,
+    // or a bare quoted string, or a non-space token.
+    // Note: [^\s"] (not \S) for the prefix — \S includes " which breaks the parse.
+    const re = /([^\s"]*)"([^"]*)"|\S+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s)) !== null) result.push(m[2] !== undefined ? m[1] + m[2] : m[0]);
+    return result;
+  }
+
   // ── file diff viewer ─────────────────────────────────────
   let selectedFile = $state<CommitFile | null>(null);
 
-  function selectFile(file: CommitFile) {
+  async function selectFile(file: CommitFile) {
     if (!selectedCommit || !repoPath) return;
     selectedFile = file;
+
+    if (settings.externalDiffEnabled && settings.externalDiffPath) {
+      try {
+        const res = await rpc.git.extractDiffFiles(repoPath, selectedCommit.sha, file.path);
+        const template = settings.externalDiffArgs || '"{left}" "{right}"';
+        const args = buildArgs(template, {
+          left: res.leftPath, right: res.rightPath,
+          leftLabel: res.leftLabel, rightLabel: res.rightLabel,
+        });
+        await invoke("launch_detached", { program: settings.externalDiffPath, args });
+        return;
+      } catch (e) {
+        applyError = `External diff tool error: ${e instanceof Error ? e.message : String(e)}`;
+        return;
+      }
+    }
+
     const params = new URLSearchParams({
       repo: repoPath,
       sha: selectedCommit.sha,

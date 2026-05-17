@@ -150,6 +150,33 @@ export interface AppSettings {
   showEolMarkers: boolean;
   autoFetchOnOpen: boolean;
   theme: "dark" | "light";
+  externalDiffEnabled: boolean;
+  externalDiffPath: string;
+  externalDiffArgs: string;
+  externalMergeEnabled: boolean;
+  externalMergePath: string;
+  externalMergeArgs: string;
+}
+
+export interface ExtractDiffFilesResult {
+  leftPath: string;
+  rightPath: string;
+  leftLabel: string;
+  rightLabel: string;
+  tmpDir: string;
+}
+
+export interface ExtractConflictFilesResult {
+  basePath: string;
+  oursPath: string;
+  theirsPath: string;
+  outputPath: string;
+  tmpDir: string;
+}
+
+export interface DetectedTool {
+  name: string;
+  path: string;
 }
 
 export interface RpcError {

@@ -239,6 +239,18 @@ struct AppSettings {
     auto_fetch_on_open: bool,
     #[serde(default = "default_theme")]
     theme: String,
+    #[serde(rename = "externalDiffEnabled", default)]
+    external_diff_enabled: bool,
+    #[serde(rename = "externalDiffPath", default)]
+    external_diff_path: String,
+    #[serde(rename = "externalDiffArgs", default)]
+    external_diff_args: String,
+    #[serde(rename = "externalMergeEnabled", default)]
+    external_merge_enabled: bool,
+    #[serde(rename = "externalMergePath", default)]
+    external_merge_path: String,
+    #[serde(rename = "externalMergeArgs", default)]
+    external_merge_args: String,
 }
 
 fn default_theme() -> String { "dark".to_string() }
@@ -251,6 +263,12 @@ impl Default for AppSettings {
             show_eol_markers: false,
             auto_fetch_on_open: false,
             theme: default_theme(),
+            external_diff_enabled: false,
+            external_diff_path: String::new(),
+            external_diff_args: String::new(),
+            external_merge_enabled: false,
+            external_merge_path: String::new(),
+            external_merge_args: String::new(),
         }
     }
 }
@@ -287,6 +305,53 @@ fn settings_save(app: tauri::AppHandle, settings: AppSettings) -> Result<(), Str
         serde_json::to_string_pretty(&settings).map_err(|e| format!("serialize failed: {e}"))?;
     fs::write(&path, data).map_err(|e| format!("write settings failed: {e}"))?;
     Ok(())
+}
+
+// ── external tool launch ──────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn launch_detached(program: String, args: Vec<String>) -> Result<(), String> {
+    tokio::process::Command::new(&program)
+        .args(&args)
+        .spawn()
+        .map_err(|e| format!("launch failed: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn launch_and_wait(program: String, args: Vec<String>) -> Result<(), String> {
+    tokio::process::Command::new(&program)
+        .args(&args)
+        .spawn()
+        .map_err(|e| format!("launch failed: {e}"))?
+        .wait()
+        .await
+        .map_err(|e| format!("wait failed: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn detect_external_tools() -> Vec<serde_json::Value> {
+    let candidates: &[(&str, &str)] = &[
+        ("TortoiseGit", r"C:\Program Files\TortoiseGit\bin\TortoiseGitProc.exe"),
+        ("Beyond Compare 3", r"C:\Program Files (x86)\Beyond Compare 3\BCompare.exe"),
+        ("Beyond Compare 4", r"C:\Program Files\Beyond Compare 4\BCompare.exe"),
+        ("WinMerge", r"C:\Program Files\WinMerge\WinMergeU.exe"),
+    ];
+    // VSCode path varies per user; expand %LOCALAPPDATA% manually
+    let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let vscode_path = format!(r"{localappdata}\Programs\Microsoft VS Code\Code.exe");
+
+    let mut found: Vec<serde_json::Value> = candidates
+        .iter()
+        .filter(|(_, path)| std::path::Path::new(path).exists())
+        .map(|(name, path)| serde_json::json!({ "name": name, "path": path }))
+        .collect();
+
+    if std::path::Path::new(&vscode_path).exists() {
+        found.push(serde_json::json!({ "name": "VSCode", "path": vscode_path }));
+    }
+    found
 }
 
 // ── recent repos ─────────────────────────────────────────────────────────────
@@ -347,6 +412,9 @@ pub fn run() {
             settings_save,
             git_log_read,
             git_log_clear,
+            launch_detached,
+            launch_and_wait,
+            detect_external_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

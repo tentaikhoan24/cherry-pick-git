@@ -24,6 +24,8 @@ import type {
   FileContentResult,
   WriteAndStageResult,
   AppSettings,
+  ExtractDiffFilesResult,
+  ExtractConflictFilesResult,
 } from "./rpc-types";
 
 export class RpcCallError extends Error {
@@ -127,5 +129,17 @@ export const rpc = {
 
     writeAndStageFile: (repo: string, file: string, content: string) =>
       call<WriteAndStageResult>("git.writeAndStageFile", { repo, file, content }),
+
+    extractDiffFiles: (repo: string, sha: string, file: string) =>
+      call<ExtractDiffFilesResult>("git.extractDiffFiles", { repo, sha, file }),
+
+    extractConflictFiles: (repo: string, file: string) =>
+      call<ExtractConflictFilesResult>("git.extractConflictFiles", { repo, file }),
+
+    stageResolvedFile: (repo: string, file: string, contentPath: string) =>
+      call<{ staged: boolean }>("git.stageResolvedFile", { repo, file, contentPath }),
+
+    cleanupTmpDir: (tmpDir: string) =>
+      call<Record<string, never>>("git.cleanupTmpDir", { tmpDir }),
   },
 };

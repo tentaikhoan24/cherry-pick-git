@@ -306,7 +306,13 @@
       <div class="panel-scroll" bind:this={leftPane} onscroll={onLeftScroll}>
         {#if !loading}
           {#if rows.length === 0}
-            <div class="empty">No changes.</div>
+            {#if file?.status === "A"}
+              <div class="empty empty-note">File did not exist</div>
+            {:else if file?.status === "D"}
+              <div class="empty">Empty file</div>
+            {:else}
+              <div class="empty">No changes.</div>
+            {/if}
           {:else}
             {#each rows as row}
               {#if row.kind === "hunk"}
@@ -347,7 +353,13 @@
       <div class="panel-scroll" bind:this={rightPane} onscroll={onRightScroll}>
         {#if !loading}
           {#if rows.length === 0}
-            <div class="empty">No changes.</div>
+            {#if file?.status === "A"}
+              <div class="empty">New empty file</div>
+            {:else if file?.status === "D"}
+              <div class="empty empty-note">File was deleted</div>
+            {:else}
+              <div class="empty">No changes.</div>
+            {/if}
           {:else}
             {#each rows as row}
               {#if row.kind === "hunk"}
@@ -583,5 +595,9 @@
     color: var(--text-muted, #555);
     text-align: center;
     font-family: ui-monospace, monospace;
+  }
+  .empty-note {
+    color: #3a3a3a;
+    font-style: italic;
   }
 </style>

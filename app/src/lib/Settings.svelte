@@ -1,5 +1,7 @@
 <script lang="ts">
-  import type { AppSettings } from "./rpc-types";
+  import { invoke } from "@tauri-apps/api/core";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import type { AppSettings, DetectedTool } from "./rpc-types";
 
   interface Props {
     settings: AppSettings;
@@ -14,14 +16,89 @@
   let showEolMarkers = $state(settings.showEolMarkers);
   let autoFetchOnOpen = $state(settings.autoFetchOnOpen);
   let theme = $state(settings.theme);
+  let externalDiffEnabled = $state(settings.externalDiffEnabled);
+  let externalDiffPath = $state(settings.externalDiffPath);
+  let externalDiffArgs = $state(settings.externalDiffArgs);
+  let externalMergeEnabled = $state(settings.externalMergeEnabled);
+  let externalMergePath = $state(settings.externalMergePath);
+  let externalMergeArgs = $state(settings.externalMergeArgs);
+
+  let detectedTools = $state<DetectedTool[]>([]);
+  let detecting = $state(false);
+  let showRef = $state(false);
+
+  const DIFF_ARGS_HINT = 'Placeholders: {left} {right} {leftLabel} {rightLabel}';
+  const MERGE_ARGS_HINT = 'Placeholders: {base} {ours} {theirs} {output}';
+  const DIFF_ARGS_PLACEHOLDER = '/command:diff /path:"{left}" /path2:"{right}"';
+  const MERGE_ARGS_PLACEHOLDER = '/command:merge /path:"{output}" /base:"{base}" /theirs:"{theirs}" /mine:"{ours}"';
+
+  const TOOL_DIFF_ARGS: Record<string, string> = {
+    // TortoiseGit: /path2: appears on LEFT pane, /path: appears on RIGHT pane
+    'TortoiseGit': '/command:diff /path2:"{left}" /path:"{right}"',
+    'Beyond Compare 3': '"{left}" "{right}"',
+    'Beyond Compare 4': '"{left}" "{right}"',
+    'WinMerge': '"{left}" "{right}"',
+    'VSCode': '--diff "{left}" "{right}"',
+  };
+  const TOOL_MERGE_ARGS: Record<string, string> = {
+    // TortoiseGitMerge.exe (separate exe from TortoiseGitProc.exe) for 3-way conflict resolution
+    'TortoiseGit': '/base:"{base}" /theirs:"{theirs}" /mine:"{ours}" /merged:"{output}"',
+    'Beyond Compare 3': '"{theirs}" "{ours}" "{base}" "{output}"',
+    'Beyond Compare 4': '"{theirs}" "{ours}" "{base}" "{output}"',
+    'WinMerge': '/e /ub /wl /wr "{ours}" "{base}" "{theirs}" "{output}"',
+  };
 
   function save() {
-    onsave({ maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme });
+    onsave({
+      maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme,
+      externalDiffEnabled, externalDiffPath, externalDiffArgs,
+      externalMergeEnabled, externalMergePath, externalMergeArgs,
+    });
     onclose();
   }
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") onclose();
+  }
+
+  async function autoDetect() {
+    detecting = true;
+    try {
+      detectedTools = await invoke<DetectedTool[]>("detect_external_tools");
+    } catch {
+      detectedTools = [];
+    } finally {
+      detecting = false;
+    }
+  }
+
+  function applyDetected(t: DetectedTool) {
+    externalDiffPath = t.path;
+    // TortoiseGit uses a separate exe (TortoiseGitMerge.exe) for 3-way conflict resolution,
+    // located in the same directory as TortoiseGitProc.exe.
+    externalMergePath = t.name === 'TortoiseGit'
+      ? t.path.replace('TortoiseGitProc.exe', 'TortoiseGitMerge.exe')
+      : t.path;
+    if (TOOL_DIFF_ARGS[t.name]) externalDiffArgs = TOOL_DIFF_ARGS[t.name];
+    if (TOOL_MERGE_ARGS[t.name]) externalMergeArgs = TOOL_MERGE_ARGS[t.name];
+  }
+
+  async function browseDiffExe() {
+    const result = await openDialog({
+      title: "Select diff tool executable",
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+      multiple: false,
+    });
+    if (result) externalDiffPath = result as string;
+  }
+
+  async function browseMergeExe() {
+    const result = await openDialog({
+      title: "Select merge tool executable",
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+      multiple: false,
+    });
+    if (result) externalMergePath = result as string;
   }
 </script>
 
@@ -89,6 +166,141 @@
           <button class="seg-btn" class:active={theme === "light"} onclick={() => (theme = "light")}>Light</button>
         </div>
       </div>
+
+      <!-- External Tools -->
+      <div class="section-sep">External Tools</div>
+
+      <!-- Auto-detect -->
+      <div class="detect-row">
+        <button class="detect-btn" onclick={autoDetect} disabled={detecting}>
+          {detecting ? "Detecting…" : "Auto-detect installed tools"}
+        </button>
+        {#if detectedTools.length > 0}
+          <div class="detected-pills">
+            {#each detectedTools as t}
+              <button class="pill" onclick={() => applyDetected(t)} title="Fill path with {t.name}">{t.name}</button>
+            {/each}
+          </div>
+        {:else if !detecting}
+          <span class="detect-hint">Click to scan common install paths</span>
+        {/if}
+      </div>
+
+      <!-- External Diff Viewer -->
+      <div class="tool-block">
+        <div class="tool-header">
+          <span class="tool-name">External Diff Viewer</span>
+          <button
+            class="toggle"
+            class:on={externalDiffEnabled}
+            onclick={() => (externalDiffEnabled = !externalDiffEnabled)}
+            aria-checked={externalDiffEnabled}
+            role="switch"
+          >
+            {externalDiffEnabled ? "On" : "Off"}
+          </button>
+        </div>
+        {#if externalDiffEnabled}
+          <div class="tool-field">
+            <label class="field-label" for="diff-path">Executable path</label>
+            <div class="path-row">
+              <input
+                id="diff-path"
+                class="setting-input-full"
+                bind:value={externalDiffPath}
+                placeholder='C:\Program Files\TortoiseGit\bin\TortoiseGitProc.exe'
+                spellcheck="false"
+              />
+              <button class="browse-btn" onclick={browseDiffExe} title="Browse for executable">…</button>
+            </div>
+          </div>
+          <div class="tool-field">
+            <label class="field-label" for="diff-args">Arguments template</label>
+            <input
+              id="diff-args"
+              class="setting-input-full"
+              bind:value={externalDiffArgs}
+              placeholder={DIFF_ARGS_PLACEHOLDER}
+              spellcheck="false"
+            />
+            <span class="arg-hint">{DIFF_ARGS_HINT}</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- External Merge Tool -->
+      <div class="tool-block">
+        <div class="tool-header">
+          <span class="tool-name">External Merge Tool</span>
+          <button
+            class="toggle"
+            class:on={externalMergeEnabled}
+            onclick={() => (externalMergeEnabled = !externalMergeEnabled)}
+            aria-checked={externalMergeEnabled}
+            role="switch"
+          >
+            {externalMergeEnabled ? "On" : "Off"}
+          </button>
+        </div>
+        {#if externalMergeEnabled}
+          <div class="tool-field">
+            <label class="field-label" for="merge-path">Executable path</label>
+            <div class="path-row">
+              <input
+                id="merge-path"
+                class="setting-input-full"
+                bind:value={externalMergePath}
+                placeholder='C:\Program Files\TortoiseGit\bin\TortoiseGitProc.exe'
+                spellcheck="false"
+              />
+              <button class="browse-btn" onclick={browseMergeExe} title="Browse for executable">…</button>
+            </div>
+          </div>
+          <div class="tool-field">
+            <label class="field-label" for="merge-args">Arguments template</label>
+            <input
+              id="merge-args"
+              class="setting-input-full"
+              bind:value={externalMergeArgs}
+              placeholder={MERGE_ARGS_PLACEHOLDER}
+              spellcheck="false"
+            />
+            <span class="arg-hint">{MERGE_ARGS_HINT}</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Reference -->
+      <button class="ref-toggle" onclick={() => (showRef = !showRef)}>
+        {showRef ? "▾" : "▸"} Reference: common tool args
+      </button>
+      {#if showRef}
+        <table class="ref-table">
+          <thead><tr><th>Tool</th><th>Diff args</th><th>Merge args</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>TortoiseGit<br/><small class="ref-note">diff: TortoiseGitProc.exe<br/>merge: TortoiseGitMerge.exe</small></td>
+              <td><code>/command:diff /path:"{"{left}"}" /path2:"{"{right}"}"</code></td>
+              <td><code>/base:"{"{base}"}" /theirs:"{"{theirs}"}" /mine:"{"{ours}"}" /merged:"{"{output}"}"</code></td>
+            </tr>
+            <tr>
+              <td>Beyond Compare</td>
+              <td><code>"{"{left}"}" "{"{right}"}"</code></td>
+              <td><code>"{"{theirs}"}" "{"{ours}"}" "{"{base}"}" "{"{output}"}"</code></td>
+            </tr>
+            <tr>
+              <td>WinMerge</td>
+              <td><code>"{"{left}"}" "{"{right}"}"</code></td>
+              <td><code>/e /ub /wl /wr "{"{ours}"}" "{"{base}"}" "{"{theirs}"}" "{"{output}"}"</code></td>
+            </tr>
+            <tr>
+              <td>VSCode</td>
+              <td><code>--diff "{"{left}"}" "{"{right}"}"</code></td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      {/if}
     </div>
 
     <div class="modal-footer">
@@ -112,8 +324,9 @@
     background: var(--surface, #252525);
     border: 1px solid var(--border, #3a3a3a);
     border-radius: 10px;
-    width: 380px;
+    width: 460px;
     max-width: calc(100vw - 2rem);
+    max-height: 90vh;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
@@ -124,6 +337,7 @@
     justify-content: space-between;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border, #3a3a3a);
+    flex-shrink: 0;
   }
   .modal-title {
     font-size: 0.9rem;
@@ -146,6 +360,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    overflow-y: auto;
   }
   .setting-row {
     display: flex;
@@ -202,12 +417,164 @@
     color: #fff;
   }
 
+  /* ── section separator ── */
+  .section-sep {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted, #666);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--border, #3a3a3a);
+    margin-top: 0.25rem;
+  }
+
+  /* ── auto-detect ── */
+  .detect-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .detect-btn {
+    padding: 0.28rem 0.75rem;
+    border-radius: 5px;
+    border: 1px solid var(--border, #555);
+    background: var(--input-bg, #2a2a2a);
+    color: var(--text-secondary, #ccc);
+    font-size: 0.78rem;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .detect-btn:hover:not(:disabled) { background: var(--hover, #3a3a3a); color: var(--text, #f0f0f0); }
+  .detect-btn:disabled { opacity: 0.5; cursor: default; }
+  .detect-hint { font-size: 0.72rem; color: var(--text-muted, #666); }
+  .detected-pills { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+  .pill {
+    padding: 0.18rem 0.55rem;
+    border-radius: 99px;
+    border: 1px solid var(--accent, #4a7ef5);
+    background: rgba(74,126,245,0.1);
+    color: var(--accent, #4a7ef5);
+    font-size: 0.72rem;
+    cursor: pointer;
+  }
+  .pill:hover { background: rgba(74,126,245,0.2); }
+
+  /* ── tool block ── */
+  .tool-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--surface-elevated, #1e1e1e);
+  }
+  .tool-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .tool-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary, #ccc);
+  }
+  .tool-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .field-label {
+    font-size: 0.72rem;
+    color: var(--text-muted, #888);
+  }
+  .path-row {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+  }
+  .path-row .setting-input-full { flex: 1; width: auto; }
+  .browse-btn {
+    flex-shrink: 0;
+    padding: 0.28rem 0.55rem;
+    border-radius: 5px;
+    border: 1px solid var(--border, #555);
+    background: var(--input-bg, #2a2a2a);
+    color: var(--text-secondary, #ccc);
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .browse-btn:hover { background: var(--hover, #3a3a3a); color: var(--text, #f0f0f0); }
+
+  .setting-input-full {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.28rem 0.5rem;
+    border-radius: 5px;
+    border: 1px solid var(--border, #555);
+    background: var(--input-bg, #1a1a1a);
+    color: var(--text, #f0f0f0);
+    font-size: 0.78rem;
+    font-family: ui-monospace, Consolas, monospace;
+    outline: none;
+  }
+  .setting-input-full:focus { border-color: var(--accent, #4a7ef5); }
+  .arg-hint {
+    font-size: 0.68rem;
+    color: var(--text-muted, #666);
+    font-family: ui-monospace, Consolas, monospace;
+  }
+
+  /* ── reference table ── */
+  .ref-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted, #666);
+    font-size: 0.72rem;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+  }
+  .ref-toggle:hover { color: var(--text-secondary, #aaa); }
+  .ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.68rem;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--text-secondary, #aaa);
+  }
+  .ref-table th {
+    text-align: left;
+    padding: 0.2rem 0.4rem;
+    border-bottom: 1px solid var(--border, #333);
+    color: var(--text-muted, #666);
+    font-weight: 600;
+  }
+  .ref-table td {
+    padding: 0.2rem 0.4rem;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border, #252525);
+  }
+  .ref-table code {
+    color: #aaa;
+  }
+  .ref-note {
+    font-family: inherit;
+    font-size: 0.64rem;
+    color: var(--text-muted, #555);
+    font-style: italic;
+  }
+
   .modal-footer {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
     padding: 0.65rem 1rem;
     border-top: 1px solid var(--border, #3a3a3a);
+    flex-shrink: 0;
   }
   .cancel-btn {
     padding: 0.35rem 0.9rem;

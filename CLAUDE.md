@@ -4,7 +4,7 @@ Context for AI-assisted development on `lazy-cherry-pick`. Read this first when 
 
 ## In one paragraph
 
-A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M7 done: persistent app settings (maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, dark/light theme) via Rust `settings_load/save`; gear button in toolbar; full light-theme support via CSS custom properties; Git Console panel (realtime git command log, grouped by RPC call with branch/target context, stored in `%APPDATA%/com.lazycherrypick.app/git.log`). All UI text in English.
+A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M8 done: external diff/merge tool support — users can configure TortoiseGit, Beyond Compare, WinMerge, VSCode (or any exe) as diff viewer / merge tool; Go sidecar extracts file versions to temp dirs; Rust `launch_detached`/`launch_and_wait` commands launch external processes; Settings modal has path input + args template + Browse button + Auto-detect. Built-in viewers remain as fallback when external tools are disabled. All UI text in English.
 
 ## File map
 
@@ -21,12 +21,13 @@ A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a
 | `app/src/lib/CommitFiles.svelte` | File list for a commit with status badge (+/- stats), click to open diff |
 | `app/src/lib/FileDiff.svelte` | 2-panel side-by-side diff renderer (TortoiseGit-style): sync scroll, EOL marker toggle (¶), trailing-newline transform |
 | `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort; resolved files open staged diff |
-| `app/src/lib/Settings.svelte` | Settings modal — maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme (Dark/Light) |
+| `app/src/lib/Settings.svelte` | Settings modal — maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme (Dark/Light); External Tools section (diff + merge: toggle, path, args template, Browse button, Auto-detect) |
 | `app/src/lib/GitConsole.svelte` | Git Console panel — realtime git command log grouped by RPC call; load history from file; Clear button |
 | `app/src/lib/rpc.ts` | Typed wrapper around `invoke('sidecar_call', ...)` + direct Tauri commands |
 | `app/src/lib/rpc-types.ts` | TypeScript types mirroring Go sidecar types |
-| `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (stderr `[GIT_CMD]`/`[GIT_INFO]` parsing + git-log events + file append), `settings_load/save`, `git_log_read/clear`, `recents_load/save` |
-| `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tokio` |
+| `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (stderr `[GIT_CMD]`/`[GIT_INFO]` parsing + git-log events + file append), `settings_load/save`, `git_log_read/clear`, `recents_load/save`, `launch_detached`, `launch_and_wait`, `detect_external_tools` |
+| `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tokio` (features: `sync`, `io-util`, `macros`, `process`) |
+| `sidecar/internal/git/externaltool.go` | `ExtractDiffFiles`, `ExtractConflictFiles`, `StageResolvedFile`, `CleanupTmpDir` — extracts file versions to `lcp-diff-*`/`lcp-merge-*` temp dirs for external tools |
 | `app/src-tauri/tauri.conf.json` | `bundle.externalBin: ["binaries/sidecar"]` |
 | `app/src-tauri/capabilities/default.json` | `shell:allow-*` for sidecar + `dialog:allow-open`; window globs: `diff-*`, `conflict-*` |
 | `app/src-tauri/binaries/sidecar-<triple>.exe` | Built sidecar binary — Tauri requires the target triple suffix |
@@ -100,7 +101,8 @@ cargo build
 - **Progress protocol:** intermediate lines carry `"progress"` field (not `"result"/"error"`) with the same `id`. Rust detects by `parsed.get("progress").is_some()`. Frontend listens via `@tauri-apps/api/event` `listen("cp-progress", ...)`.
 - **Cancel:** `sidecar_cancel` Tauri command drains `ActiveSidecar` (`Mutex<HashMap<u64, CommandChild>>`), killing all active children. Frontend then calls `git.abort` via a new sidecar spawn to run `git cherry-pick --abort`.
 - **Recent repos:** stored in `%APPDATA%/com.lazycherrypick.app/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
-- **App settings:** stored in `%APPDATA%/com.lazycherrypick.app/settings.json` by Rust `settings_load`/`settings_save`. Fields: `maxCommits`, `defaultApplyMode`, `showEolMarkers`, `autoFetchOnOpen`, `theme`. Returns defaults on missing/corrupted file.
+- **App settings:** stored in `%APPDATA%/com.lazycherrypick.app/settings.json` by Rust `settings_load`/`settings_save`. Fields: `maxCommits`, `defaultApplyMode`, `showEolMarkers`, `autoFetchOnOpen`, `theme`, `externalDiffEnabled`, `externalDiffPath`, `externalDiffArgs`, `externalMergeEnabled`, `externalMergePath`, `externalMergeArgs`. Returns defaults on missing/corrupted file. All fields have `#[serde(default)]` — backward compatible.
+- **External tool launch:** `launch_detached(program, args)` — fire-and-forget for diff; `launch_and_wait(program, args)` — async block until tool exits for merge. Both are Rust Tauri commands using `tokio::process::Command`. `detect_external_tools()` checks 5 known paths (TortoiseGit, BC3, BC4, WinMerge, VSCode) and returns found tools as `[{name, path}]`.
 - **Git command log:** sidecar emits `[GIT_CMD] git <args>` (without `-C dir`) and `[GIT_INFO] git.method → branch` to stderr. Rust batchs stdout (RPC protocol) and stderr separately — stderr lines with those prefixes are emitted as Tauri `git-log` events and appended to `%APPDATA%/com.lazycherrypick.app/git.log`. Format per line: `<type> <unix-ts> <content>` where type is `cmd` or `info`.
 - **Sidecar logs to stderr, responses to stdout.** Don't write logs to stdout.
 - **Capabilities are scoped to `binaries/sidecar`.** Don't broaden to `shell:default`.
@@ -165,6 +167,18 @@ cargo build
 - **English UI**: All Vietnamese text translated to English across all `.svelte` files.
 - **Git Console**: `GitConsole.svelte` panel (180px, always dark). Toggle button (`>_`) in Toolbar with active state. Go `exec.go` logs `[GIT_CMD] git <args>` (without `-C dir`) to stderr before each git exec. `server.go` logs `[GIT_INFO] git.method → target/branch` to stderr before each `git.*` dispatch. Rust parses both prefixes from `CommandEvent::Stderr`, emits `git-log` event `{ts, type, cmd}`, appends `<type> <ts> <cmd>` to `git.log`. Frontend loads history via `git_log_read` on mount, listens `git-log` for realtime. Renders `info` entries as group headers (method + branch), `cmd` entries as indented lines with `git` (dim) + subcommand (cyan bold) + args (gray). Auto-scroll with pause when user scrolls up. `git_log_clear` Tauri command truncates the file.
 
+**M8 done**:
+- **External diff viewer**: Settings → External Tools → enable + set path/args → clicking a file in CommitFiles now calls `git.extractDiffFiles` (Go sidecar extracts `SHA^:file` and `SHA:file` to `lcp-diff-*` temp dir), builds CLI args from template (`{left}`, `{right}`, `{leftLabel}`, `{rightLabel}`), calls `launch_detached` Rust command. Temp files are NOT cleaned — OS cleans on reboot.
+- **External merge tool**: Settings → External Tools → enable + set merge path/args → clicking a conflict file calls `git.extractConflictFiles` (extracts `:1:` base, `:2:` ours, `:3:` theirs, working-tree copy as output to `lcp-merge-*` temp dir), calls `launch_and_wait` (blocks until tool closes), then `git.stageResolvedFile` writes output back + stages it, then `git.cleanupTmpDir` removes temp dir.
+- **Args template**: `buildArgs()` helper in `+page.svelte` substitutes `{key}` placeholders then splits respecting quoted tokens. Critical: regex uses `([^\s"]*)` (NOT `\S*`) as unquoted prefix — `\S` includes `"` causing backtracking that embeds `"` chars in args → Rust's CreateProcessW escaping corrupts paths (`D:\C:\...` prefix, `\` suffix).
+- **Conflict marker guard**: `StageResolvedFile` in `externaltool.go` checks `bytes.Contains(data, []byte("<<<<<<<"))` before staging — prevents auto-staging when merge tool is closed without resolving all conflicts.
+- **TortoiseGit tool split**: `TortoiseGitProc.exe` for diff; `TortoiseGitMerge.exe` (same `bin/` dir) for 3-way merge. Auto-detect fills merge path via string replace. `/command:merge` on TortoiseGitProc.exe opens wrong dialog.
+- **TortoiseGit diff direction**: `/path:` arg → RIGHT pane; `/path2:` arg → LEFT pane (opposite of naming). Correct: `/command:diff /path2:"{left}" /path:"{right}"`.
+- **Auto-detect auto-fills args**: `applyDetected()` in `Settings.svelte` fills `TOOL_DIFF_ARGS[name]` / `TOOL_MERGE_ARGS[name]` constants when user clicks a detected tool pill.
+- **Browse button**: `@tauri-apps/plugin-dialog` `open()` with exe filter — lets user pick .exe without typing path.
+- **FileDiff.svelte status-aware empty messages**: status "A" → "File did not exist" (left) / "New empty file" (right); status "D" → "Empty file" / "File was deleted". Fixes "No changes." shown for newly-added empty files.
+- **conflict/+page.svelte async onMount fix**: wrapped async init in IIFE, returned sync cleanup — fixes TypeScript error from Svelte's `onMount` typing.
+
 **Not done**: packaging, signing.
 
 See README roadmap for M5+ scope.
@@ -183,7 +197,7 @@ See README roadmap for M5+ scope.
 
 When working with the user on this repo, prior decisions are stored as Claude memories:
 - `user-language-vi` — communicate in Vietnamese, prefer short option-style questions
-- `project-m4-complete`, `project-m5-complete`, `project-m5c-wip`, `project-m5d-complete` — feature checklists per milestone
+- `project-m4-complete`, `project-m5-complete`, `project-m5c-wip`, `project-m5d-complete`, `project-m6-complete`, `project-m7-complete`, `project-m8-complete` — feature checklists per milestone
 - `design-conflict-merge-logic` — conflict merge editor (provisional model, parser, render pipeline)
 - `design-side-by-side-diff` — 2-panel diff viewer logic incl. trailing-newline transform with lookahead
 
