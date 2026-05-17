@@ -53,6 +53,5 @@ text.txt
 *VN.*
 build/
 releases/
-.github/
 BUILD_GUIDE.md
 sidecar/internal/git/stageddiff.go

@@ -1,0 +1,71 @@
+name: "Publish Release"
+
+on:
+  push:
+    tags:
+      - 'v*' # Chạy khi bạn push một tag có định dạng v1.0.0, v0.1.0...
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+
+      - name: run go tests
+        shell: pwsh
+        run: |
+          cd sidecar
+          go test ./internal/git/ -v
+          cd ..
+
+      - name: build sidecar
+        shell: pwsh
+        run: |
+          $triple = (rustc -vV | Select-String "host:").ToString().Split(":")[1].Trim()
+          cd sidecar
+          go build -ldflags="-s -w" -o ../app/src-tauri/binaries/sidecar-$triple.exe .
+          cd ..
+
+      - name: install frontend dependencies
+        run: |
+          cd app
+          npm install
+
+      - uses: tauri-apps/tauri-action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Lazy Cherry Pick ${{ github.ref_name }}"
+          releaseBody: |
+            ## What's New
+            See commit history for full details.
+
+            ## Installation
+            1. Download the `.msi` installer below.
+            2. Run it (click "More info → Run anyway" if Windows SmartScreen warns you — the app is unsigned).
+            3. **Prerequisite:** [Git for Windows](https://git-scm.com/downloads) must be installed.
+          releaseDraft: true
+          prerelease: false
