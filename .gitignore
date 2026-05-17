@@ -1,0 +1,50 @@
+# IDEs and Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.vs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Node.js (app directory)
+app/node_modules/
+app/.svelte-kit/
+app/build/
+app/dist/
+app/package/
+app/.env
+app/.env.*
+!app/.env.example
+app/vite.config.js.timestamp-*
+app/vite.config.ts.timestamp-*
+
+# Rust / Tauri (app/src-tauri directory)
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/Cargo.lock
+
+# Go (sidecar directory)
+sidecar/sidecar
+sidecar/sidecar.exe
+sidecar/*.test
+sidecar/*.out
+sidecar/vendor/
+
+# Others
+tmp/
+out/
+bin/
+text.txt

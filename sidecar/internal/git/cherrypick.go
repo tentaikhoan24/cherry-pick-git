@@ -1,0 +1,107 @@
+package git
+
+import (
+	"context"
+)
+
+type CherryPickArgs struct {
+	Target   string   `json:"target"`
+	Shas     []string `json:"shas"`
+	Strategy string   `json:"strategy"` // "smart" (default), "theirs"/"incoming", "ours"
+	// OnProgress is called after each successful commit with 1-based index and
+	// total count. Not serialised — injected by the RPC handler in main.go.
+	OnProgress func(n, total int, sha string) `json:"-"`
+}
+
+// CherryPick applies the given commits onto Target sequentially. If Target
+// differs from the current branch, the working tree must be clean — otherwise
+// returns CodeDirtyTree. On the first conflicting commit, the cherry-pick is
+// aborted (repo returned to clean state) and CodeCherryPickConflict is returned
+// with the partial result attached in Data.
+//
+// Future (M5): switch from abort-on-conflict to leave-in-conflict-state so the
+// frontend can drive a 3-way merge resolver.
+func (r *Repo) CherryPick(ctx context.Context, args CherryPickArgs) (*CherryPickResult, error) {
+	current, detached, err := r.CurrentBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if detached {
+		return nil, &Error{
+			Code:    CodeGitCommandFailed,
+			Message: "cannot cherry-pick onto detached HEAD; switch to a branch first",
+		}
+	}
+
+	target := args.Target
+	if target == "" {
+		target = current
+	}
+
+	// Cherry-pick requires a clean working tree both for switching target
+	// (otherwise checkout would overwrite changes) and for the picks themselves
+	// (otherwise git refuses or produces misleading "conflict" errors).
+	dirty, err := r.IsDirty(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if dirty {
+		return nil, &Error{
+			Code:    CodeDirtyTree,
+			Message: "working tree has uncommitted changes; commit, stash, or discard before cherry-pick",
+			Data: map[string]any{
+				"current": current,
+				"target":  target,
+			},
+		}
+	}
+
+	if target != current {
+		if _, err := run(ctx, r.Path, "checkout", target); err != nil {
+			return nil, err
+		}
+	}
+
+	result := &CherryPickResult{
+		Applied:   []string{},
+		Conflicts: []ConflictInfo{},
+	}
+
+	for _, sha := range args.Shas {
+		gitArgs := []string{"cherry-pick"}
+		switch args.Strategy {
+		case "theirs", "incoming":
+			gitArgs = append(gitArgs, "--strategy-option=theirs")
+		case "ours":
+			gitArgs = append(gitArgs, "--strategy-option=ours")
+		}
+		gitArgs = append(gitArgs, sha)
+
+		if _, err := run(ctx, r.Path, gitArgs...); err != nil {
+			// Use the public ConflictFiles (git status --porcelain) — more reliable than
+			// git diff --diff-filter=U, especially for AA (added-both-sides) conflicts.
+			var files []string
+			if cfr, err2 := r.ConflictFiles(ctx, ConflictFilesArgs{}); err2 == nil && cfr != nil {
+				for _, f := range cfr.Files {
+					files = append(files, f.Path)
+				}
+			}
+			result.Conflicts = append(result.Conflicts, ConflictInfo{Sha: sha, Files: files})
+			// Leave repo in conflict state — frontend drives resolution via ConflictResolver.
+			return result, &Error{
+				Code:    CodeCherryPickConflict,
+				Message: "cherry-pick produced conflicts on " + sha,
+				Data: map[string]any{
+					"applied":   result.Applied,
+					"conflicts": result.Conflicts,
+				},
+			}
+		}
+		result.Applied = append(result.Applied, sha)
+		if args.OnProgress != nil {
+			args.OnProgress(len(result.Applied), len(args.Shas), sha)
+		}
+	}
+	return result, nil
+}
+

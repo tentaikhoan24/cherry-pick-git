@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(go version *)",
+      "Bash(git --version)",
+      "PowerShell(winget --version)",
+      "PowerShell(winget install --id Rustlang.Rustup --silent --accept-package-agreements --accept-source-agreements)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\); Get-Command rustup -ErrorAction SilentlyContinue; Get-Command rustc -ErrorAction SilentlyContinue; Test-Path \"$env:USERPROFILE\\\\.cargo\\\\bin\\\\rustup.exe\")",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;\" + $env:Path; rustup --version; rustup show; rustc --version; cargo --version)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;\" + $env:Path; rustup default stable; rustc --version; cargo --version)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

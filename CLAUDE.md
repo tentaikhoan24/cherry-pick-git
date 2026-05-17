@@ -1,0 +1,167 @@
+# CLAUDE.md
+
+Context for AI-assisted development on `cherry-pick-git`. Read this first when entering the repo.
+
+## In one paragraph
+
+A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M5 is partially complete: commit detail panels, dry-run conflict preview, file diff viewer, conflict resolver UI (3-way merge editor), Create Branch button, and all M4 features (progress bar, Cancel, Fetch/Pull, recent repos).
+
+## File map
+
+| Path | Role |
+|---|---|
+| `app/src/routes/+page.svelte` | Main orchestrator — 3-pane UI, all app state |
+| `app/src/routes/diff/+page.svelte` | File diff viewer window (unified diff, nav buttons, syntax highlight) |
+| `app/src/routes/conflict/+page.svelte` | 3-pane conflict merge editor (Theirs / Ours / merged result) |
+| `app/src/lib/Toolbar.svelte` | Repo path display + Open repo (file dialog) |
+| `app/src/lib/CommitList.svelte` | Source branch dropdown + scrollable commit list with checkboxes |
+| `app/src/lib/PickQueue.svelte` | Ordered pick queue + target branch dropdown + Apply button |
+| `app/src/lib/ResultBanner.svelte` | Result display: ✅ applied / ⚠️ conflict / 🔴 error |
+| `app/src/lib/CommitDetail.svelte` | Commit subject, body, SHA, author, date, parents panel |
+| `app/src/lib/CommitFiles.svelte` | File list for a commit with status badge (+/- stats), click to open diff |
+| `app/src/lib/FileDiff.svelte` | Unified diff renderer with line numbers and change block navigation |
+| `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort |
+| `app/src/lib/rpc.ts` | Typed wrapper around `invoke('sidecar_call', ...)` + direct Tauri commands |
+| `app/src/lib/rpc-types.ts` | TypeScript types mirroring Go sidecar types |
+| `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (multi-line reader + cp-progress events), `sidecar_cancel`, `recents_load/save` |
+| `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tokio` |
+| `app/src-tauri/tauri.conf.json` | `bundle.externalBin: ["binaries/sidecar"]` |
+| `app/src-tauri/capabilities/default.json` | `shell:allow-*` for sidecar + `dialog:allow-open`; window globs: `diff-*`, `conflict-*` |
+| `app/src-tauri/binaries/sidecar-<triple>.exe` | Built sidecar binary — Tauri requires the target triple suffix |
+| `sidecar/main.go` | NDJSON JSON-RPC dispatcher; `wrap1` generic helper; `toRPCError` bridge; `git.cherryPick` uses manual handler to inject progress callback |
+| `sidecar/internal/rpc/server.go` | NDJSON JSON-RPC 2.0 transport; BOM stripping; dispatch loop; `ProgressWriter` + `WriteProgress` |
+| `sidecar/internal/git/` | Git operations layer (19 files) — see sidecar/README.md |
+| `sidecar/go.mod` | Module `github.com/cherry-pick-git/sidecar`; Go 1.23 |
+| `docs/IPC.md` | Full protocol spec — method signatures, types, error codes |
+
+## Commands
+
+Fresh PowerShell sessions on Windows often lack cargo/go on PATH. Always prepend:
+```powershell
+$env:Path = "$env:USERPROFILE\.cargo\bin;C:\Program Files\Go\bin;" + $env:Path
+```
+
+**Rebuild sidecar** (required after editing any `sidecar/*.go`):
+```powershell
+$triple = (rustc -vV | Select-String "host:").ToString().Split(":")[1].Trim()
+Set-Location sidecar
+go build -o ..\app\src-tauri\binaries\sidecar-$triple.exe .
+```
+
+**Run Go integration tests:**
+```powershell
+Set-Location sidecar
+go test ./internal/git/ -v
+```
+
+**Sidecar smoke test** (no Tauri — verify Go layer in isolation):
+```powershell
+$s = ".\app\src-tauri\binaries\sidecar-x86_64-pc-windows-msvc.exe"
+'{"jsonrpc":"2.0","id":1,"method":"ping"}' | & $s
+'{"jsonrpc":"2.0","id":2,"method":"git.status","params":{"repo":"C:\\path\\to\\repo"}}' | & $s
+```
+
+**Rust compile check** (no Vite needed):
+```powershell
+Set-Location app\src-tauri
+cargo build
+```
+
+**Dev server (full app)** — must be run in the user's own terminal (see hard rule #1):
+```powershell
+.\dev.ps1
+# or: cd app && npm run tauri dev
+```
+
+## Hard rules for AI agents
+
+1. **Never run `npm run tauri dev` via a background/agent task.** Gets terminated when parent shell exits. Always ask the user to run it in their own terminal. (Verified during M1.)
+
+2. **After editing `sidecar/*.go`, rebuild the binary to `app/src-tauri/binaries/sidecar-<triple>.exe`.** Tauri bundles the binary at dev time — source changes are invisible until rebuild. On this machine the triple is `x86_64-pc-windows-msvc`.
+
+3. **When adding RPC methods:** (a) implement in `sidecar/internal/git/`, (b) register in `sidecar/main.go` via `s.Register("name", wrap1(...))` — except methods that need progress streaming, which use a manual handler (see `git.cherryPick` pattern), (c) update `docs/IPC.md`, (d) add TypeScript types to `rpc-types.ts`, (e) add typed wrapper to `rpc.ts`. No Rust change needed per method.
+
+4. **JSON over stdio is NDJSON** — one JSON object per line. Never embed raw `\n` inside a JSON value. Go's `json.Encoder.Encode` always appends `\n` — keep using it.
+
+5. **Strip UTF-8 BOM on every input line.** `rpc/server.go` does `bytes.TrimPrefix(line, utf8BOM)`. Don't remove — Windows PowerShell pipes prepend BOM.
+
+6. **Target branch model is Model B with default = current HEAD.** Sidecar always checks dirty tree before applying. If `target != current`, checkout happens only after dirty-tree check passes. Implemented and tested in `cherrypick.go`.
+
+7. **The sidecar is the only layer that shells out to `git`.** No `git` calls in Rust, no direct `git_*` invocations from Svelte. Path: Frontend → `rpc.ts` → `invoke('sidecar_call')` → Rust `sidecar_call` → Go sidecar → `git`.
+
+8. **The frontend has no `@tauri-apps/plugin-shell` dependency.** Svelte uses `@tauri-apps/plugin-dialog` (for folder picker) and our own `sidecar_call` command only. Never add `plugin-shell` to Svelte — it would expose shell APIs to the WebView.
+
+## Architecture invariants
+
+- **One sidecar process per RPC call (current model).** `sidecar_call` does `spawn → write 1 line → read N lines → kill`. Progress-streaming calls (`git.cherryPick`) emit multiple `progress` lines before the final `result` line. Rust reads in a loop, emits Tauri event `cp-progress` for each progress line, then resolves on the final line. ~30–50 ms overhead per call.
+- **Concurrent sidecar calls are safe.** `ActiveSidecar` is `Mutex<HashMap<u64, CommandChild>>` with a per-call atomic `call_id`. Each call stores its child by `call_id` and removes only its own entry on finish — concurrent calls from multiple windows (e.g. main + conflict editor) cannot kill each other's processes. `sidecar_cancel` drains the entire map.
+- **Progress protocol:** intermediate lines carry `"progress"` field (not `"result"/"error"`) with the same `id`. Rust detects by `parsed.get("progress").is_some()`. Frontend listens via `@tauri-apps/api/event` `listen("cp-progress", ...)`.
+- **Cancel:** `sidecar_cancel` Tauri command drains `ActiveSidecar` (`Mutex<HashMap<u64, CommandChild>>`), killing all active children. Frontend then calls `git.abort` via a new sidecar spawn to run `git cherry-pick --abort`.
+- **Recent repos:** stored in `%APPDATA%/cherry-pick-git/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
+- **Sidecar logs to stderr, responses to stdout.** Don't write logs to stdout.
+- **Capabilities are scoped to `binaries/sidecar`.** Don't broaden to `shell:default`.
+- **Write operations require explicit user action.** `git.cherryPick` is only triggered by the Apply button — never called automatically. Read methods (`git.status`, `git.commits`, `git.fetch`) are fine to call on load/branch-change.
+
+## What's done / what's not
+
+**M1 done**: project scaffold, IPC contract validated end-to-end (`ping`, `version`).
+
+**M2 done**: full Go git ops layer — `git.openRepo`, `git.status`, `git.branches`, `git.commits`, `git.cherryPick`. 9 integration tests (all pass). TypeScript typed wrapper (`rpc.ts`, `rpc-types.ts`).
+
+**M3 done**: main UI — Toolbar (file dialog open), CommitList (source branch + multi-select), PickQueue (ordered queue + target dropdown + Apply), ResultBanner (applied/conflict/error). Happy path fully wired end-to-end.
+
+**M3.1 done**: Apply & Push — TortoiseGit-style dropdown on Apply button. `git.push` RPC method. Mode state persists between operations.
+
+**M4 done**:
+- **Progress streaming**: `git.cherryPick` emits progress lines (`{"progress": {"n":1,"total":3,"sha":"..."}}`) before final result. Rust reads in loop + emits Tauri event `cp-progress`. `PickQueue` shows progress bar `n/total — sha`.
+- **Cancel**: `sidecar_cancel` Tauri command kills current sidecar child. Frontend calls `git.abort` to cleanup git state. Cancel button visible during apply.
+- **Recent repos (M4b)**: Rust `recents_load`/`recents_save` commands write `%APPDATA%/cherry-pick-git/recents.json`. Toolbar shows "Recent ▾" dropdown (max 10 entries).
+- **Fetch / Pull refresh**: `git.fetch` (`git fetch --prune`) and `git.pull` (`git fetch <remote> <branch>:<branch>`, fast-forward only). CommitList header has Fetch/Pull dropdown button.
+
+**M5 partially done**:
+- **M5a — Commit detail panels**: click commit → resizable panel below shows CommitDetail (subject, body, SHA, author, date, parents) + CommitFiles (file list with status badge, +/- stats, click to open diff window). Horizontal resize handle between CommitList and PickQueue panes.
+- **M5b — Dry-run conflict preview**: `git.dryRunPick` RPC uses `git apply --3way --check`; ⚠ icon on queue items with predicted conflicts; debounce 400 ms.
+- **File diff viewer**: `git.fileDiff` RPC (`--unified=99999`); opens in a new Tauri window (`diff-${Date.now()}`); nav buttons ▲/▼ to jump between change blocks.
+- **Create Branch**: `git.createBranch` RPC; Create Branch button in PickQueue target dropdown.
+- **M5c — Conflict resolver (in progress)**: `git.conflictFiles`, `git.resolveConflict`, `git.continueCherry`, `git.fileContent`, `git.writeAndStageFile` RPCs; `ConflictResolver.svelte` with Keep Ours/Use Theirs/Continue/Abort; `/conflict` route — TortoiseGit-style 3-pane merge editor:
+  - **Line numbers** in each top pane (independent theirs/ours counters)
+  - **Inline conflict-header bar** per block: "Conflict N/M · ← Theirs · T+O" (left) / "Ours → · O+T" (right) — action buttons right at the conflict, no need to use toolbar
+  - **Independent drag-select per pane**: `leftSel` + `rightSel` state — selecting on one pane does NOT clear the other; right-click shows cross-pane combine options when both have selections
+  - **Context menu**: use selected lines from this pane / use whole block / combine both sides (4 order combinations)
+  - **Resizable H-divider**: drag to resize top/bottom ratio (20–80%)
+  - **Keyboard**: ↑↓ to navigate conflicts
+  - **Provisional resolution model**: clicking Theirs/Ours/T+O sets a *soft choice* in `provisionalChoices: Map<number, string[]>` — `mergedText` keeps conflict markers intact. Bottom pane shows chosen lines in **orange** immediately, but user can click any button again to change. `buildFinalText()` applies all choices only at save time.
+  - **Bottom pane (TortoiseGit style)**: provisionally-resolved blocks shown in orange with change buttons (← Theirs / Ours → / T+O) always visible; unresolved blocks shown as **hatched red placeholder** with Ours/Theirs/T+O buttons; click block → jumps top panes to that conflict
+  - **Toggle "✎ Raw"**: applies provisional choices to `mergedText` first, then opens textarea for direct edit
+  - Flow: cherry-pick stops in conflict state → ConflictResolver shown → click file → conflict window opens → resolve each block (changeable) → Lưu & Stage → Continue. End-to-end testing still needed.
+
+**Not done**: smart filter UI, settings, packaging, signing.
+
+See README roadmap for M5+ scope.
+
+## Tech stack pins (as installed and verified)
+
+- Node 22.17.0, npm 10.9.2
+- Rust 1.95.0 stable (`x86_64-pc-windows-msvc`)
+- Go 1.26.3
+- Git 2.50 (Git for Windows)
+- Tauri 2.11, `tauri-plugin-shell` 2.3, `tauri-plugin-opener` 2.5, `tauri-plugin-dialog` 2.x
+- Svelte 5.x, SvelteKit 2.9, Vite 6.4
+- MSVC Build Tools 2022 at `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`
+
+## Cross-session memory
+
+When working with the user on this repo, prior decisions are stored as Claude memories:
+- `project-cherry-pick-git` — overall architecture (hybrid Tauri+Go) and why
+- `design-target-model` — target branch is Model B with default = current
+- `user-language-vi` — communicate in Vietnamese, prefer short option-style questions
+
+These memories complement (not replace) this file. This file describes the **codebase**; memories describe the **user and decisions**.
+
+## When stuck
+
+- Sidecar weirdness → run it manually with a piped JSON request to isolate from Tauri (rule #5 may apply if first response is a parse error).
+- Rust compile errors after editing `lib.rs` → check plugin version in `Cargo.toml` and the plugin docs.
+- Tauri window blank → check the Vite log in the terminal where `tauri dev` runs before assuming Rust is broken.
+- "Method not found" with correct method name → did you rebuild the sidecar binary? Rule #2.
+- Frontend type error after adding a new RPC method → add types to `rpc-types.ts` and wrapper to `rpc.ts` first.
