@@ -1,6 +1,6 @@
 <script lang="ts">
   import { rpc, RpcCallError } from "$lib/rpc";
-  import type { Branch, Commit, CherryPickResult, CherryPickProgress, RecentRepo, CommitDetail, CommitFile, DryRunItem, ConflictFileInfo } from "$lib/rpc-types";
+  import type { Branch, Commit, CommitFilter, CherryPickResult, CherryPickProgress, RecentRepo, CommitDetail, CommitFile, DryRunItem, ConflictFileInfo, AppSettings } from "$lib/rpc-types";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
   import Toolbar from "$lib/Toolbar.svelte";
@@ -10,6 +10,41 @@
   import CommitDetailPanel from "$lib/CommitDetail.svelte";
   import CommitFilesPanel from "$lib/CommitFiles.svelte";
   import ConflictResolver from "$lib/ConflictResolver.svelte";
+  import SettingsModal from "$lib/Settings.svelte";
+  import GitConsole from "$lib/GitConsole.svelte";
+
+  // ── settings ──────────────────────────────────────────────
+  const DEFAULT_SETTINGS: AppSettings = { maxCommits: 100, defaultApplyMode: "apply", showEolMarkers: false, autoFetchOnOpen: false, theme: "dark" };
+  let settings = $state<AppSettings>(DEFAULT_SETTINGS);
+  let settingsOpen = $state(false);
+  let consoleOpen = $state(false);
+  let consoleHeight = $state(180);
+
+  function startConsoleResize(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = consoleHeight;
+    function onMove(ev: MouseEvent) {
+      consoleHeight = Math.max(80, Math.min(600, startH + (startY - ev.clientY)));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  rpc.settings.load().then(s => { settings = s; }).catch(() => {});
+
+  $effect(() => {
+    document.body.classList.toggle("light", settings.theme === "light");
+  });
+
+  async function saveSettings(s: AppSettings) {
+    settings = s;
+    try { await rpc.settings.save(s); } catch { /* ignore */ }
+  }
 
   // ── repo state ────────────────────────────────────────────
   let repoPath = $state("");
@@ -349,6 +384,9 @@
       targetBranch = r.branch;
       await loadCommits(sourceBranch);
       await saveRecent(r.path);
+      if (settings.autoFetchOnOpen) {
+        try { await rpc.git.fetch(r.path); branches = await rpc.git.branches(r.path); await loadCommits(sourceBranch); } catch { /* ignore */ }
+      }
       if (r.cherryPickHead) {
         conflictSha = r.cherryPickHead;
         await loadConflictFiles();
@@ -361,11 +399,13 @@
     }
   }
 
-  async function loadCommits(branch: string) {
+  let activeFilter = $state<CommitFilter>({});
+
+  async function loadCommits(branch: string, filter?: CommitFilter) {
     loadingCommits = true;
     commits = [];
     try {
-      commits = await rpc.git.commits(repoPath, branch, 100);
+      commits = await rpc.git.commits(repoPath, branch, settings.maxCommits, 0, filter ?? activeFilter);
     } catch (e) {
       applyError = e instanceof RpcCallError ? e.rpcError.message : String(e);
     } finally {
@@ -382,7 +422,13 @@
     commitDetail = null;
     commitFiles = [];
     dryRunMap = new Map();
-    loadCommits(branch);
+    activeFilter = {};
+    loadCommits(branch, {});
+  }
+
+  function applyCommitFilter(filter: CommitFilter) {
+    activeFilter = filter;
+    loadCommits(sourceBranch, filter);
   }
 
   function toggleCommit(sha: string) {
@@ -490,7 +536,7 @@
 </script>
 
 <div class="app">
-  <Toolbar {repoPath} {currentBranch} {recentRepos} onopen={openRepo} />
+  <Toolbar {repoPath} {currentBranch} {recentRepos} {consoleOpen} onopen={openRepo} onsettings={() => (settingsOpen = true)} onconsole={() => (consoleOpen = !consoleOpen)} />
 
   {#if repoPath}
     <div class="workspace">
@@ -508,6 +554,7 @@
           onselect={selectCommit}
           onfetch={doFetch}
           onpull={doPull}
+          onfilter={applyCommitFilter}
         />
       </div>
       <div class="col-resize-handle" onmousedown={startColResize} role="separator" aria-label="Resize panels"></div>
@@ -520,6 +567,7 @@
           {busy}
           {progress}
           {dryRunMap}
+          defaultApplyMode={settings.defaultApplyMode}
           ontargetbranch={(b) => { targetBranch = b; applyResult = null; applyError = ""; scheduleDryRun(); }}
           onremove={removeFromQueue}
           onapply={() => applyPick(false)}
@@ -575,6 +623,19 @@
       <p>Open a Git repository to get started.</p>
     </div>
   {/if}
+
+  {#if consoleOpen}
+    <div class="console-resize-handle" onmousedown={startConsoleResize} role="separator" aria-label="Resize console"></div>
+    <GitConsole height={consoleHeight} onclose={() => (consoleOpen = false)} />
+  {/if}
+
+  {#if settingsOpen}
+    <SettingsModal
+      {settings}
+      onclose={() => (settingsOpen = false)}
+      onsave={saveSettings}
+    />
+  {/if}
 </div>
 
 <style>
@@ -588,12 +649,30 @@
     --border-subtle: #2e2e2e;
     --toolbar-bg: #252525;
     --input-bg: #2a2a2a;
-    --hover: #2a2a2a;
+    --hover: #333333;
     --selected: #1a2a4a;
     --accent: #4a7ef5;
     --text: #f0f0f0;
     --text-secondary: #ccc;
     --text-muted: #888;
+    --surface: #252525;
+    --surface-elevated: #2c2c2c;
+  }
+  :global(body.light) {
+    background: #f5f5f5;
+    color: #1a1a1a;
+    --border: #d0d0d0;
+    --border-subtle: #e4e4e4;
+    --toolbar-bg: #ffffff;
+    --input-bg: #eeeeee;
+    --hover: #e4e4e4;
+    --selected: #dce8ff;
+    --accent: #2563eb;
+    --text: #1a1a1a;
+    --text-secondary: #444;
+    --text-muted: #888;
+    --surface: #ffffff;
+    --surface-elevated: #f8f8f8;
   }
   .app {
     display: flex;
@@ -632,6 +711,14 @@
     transition: background 0.15s;
   }
   .detail-resize-handle:hover { background: var(--accent, #4a7ef5); }
+  .console-resize-handle {
+    flex-shrink: 0;
+    height: 5px;
+    background: #2a2a2a;
+    cursor: ns-resize;
+    transition: background 0.15s;
+  }
+  .console-resize-handle:hover { background: #4a7ef5; }
   .detail-area {
     display: grid;
     grid-template-columns: 1fr 340px;

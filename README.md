@@ -2,7 +2,7 @@
 
 A desktop Git client focused on **batch cherry-pick workflows**: multi-select commits across branches, predict and preview conflicts, apply with smart filters.
 
-> Status: **M5 mostly complete** — commit detail panels, dry-run conflict preview, 2-panel side-by-side diff viewer (TortoiseGit-style with EOL markers + trailing-newline transform), conflict resolver UI with staged-diff preview for resolved files. All M4 features (progress bar, cancel, recent repos, Fetch/Pull) done.
+> Status: **M7 complete** — settings panel (maxCommits, defaultApplyMode, EOL markers, auto-fetch, dark/light theme), Git Console with realtime command log. All M1–M6 features done.
 
 ## Why
 
@@ -172,12 +172,24 @@ See [docs/IPC.md](./docs/IPC.md) for all method signatures.
 - ✅ **M3** Main UI: Toolbar + CommitList + PickQueue + ResultBanner, Apply flow wired end-to-end
 - ✅ **M3.1** Apply & Push: TortoiseGit-style mode dropdown, `git.push` RPC method
 - ✅ **M4** Progress & UX: per-commit progress bar, Cancel/abort, recent repos list, Fetch/Pull refresh dropdown
-- ⏳ **M5** Commit detail + Conflict resolver *(partially done)*:
+- ✅ **M5** Commit detail + Conflict resolver:
   - ✅ M5a — click commit → CommitDetail + CommitFiles panels (resizable); file diff viewer window
   - ✅ M5b — dry-run conflict preview (`git.dryRunPick`), ⚠ icons in queue; debounce 400 ms
   - ✅ Create Branch button in target dropdown
-  - 🔧 M5c — conflict resolver: ConflictResolver panel + TortoiseGit-style 3-pane merge editor (line numbers, inline action bars, independent dual-pane selection, hatched result pane); end-to-end testing still needed
-- ⏳ **M6** Smart filter: author, message regex, file glob, date range, conventional commits, JIRA pattern, trailer labels; named filter presets
+  - ✅ M5c — conflict resolver: ConflictResolver panel + TortoiseGit-style 3-pane merge editor
+  - ✅ M5d — 2-panel side-by-side diff viewer (EOL markers, trailing-newline transform); staged diff; project rename
+- ✅ **M6** Smart filter + UX polish:
+  - ✅ Searchable branch dropdown (`BranchSelect`) in both source and target panels
+  - ✅ Commit filter bar: author / message / since / until / path glob; Apply + Clear
+  - ✅ Filter presets: save named filters to localStorage, load from dropdown; active preset shown in button; "Save | ▾" split-button to overwrite or save-as when preset is modified
+  - ✅ Commit badges: conventional commit prefix (feat/fix/docs/…) + JIRA pattern `[ABC-123]`
+  - ✅ Checkbox hit area enlarged (label wrap with padding)
+  - ✅ Root commit loading bug fixed (nil parents → JSON null → TypeError)
+- ✅ **M7** Settings + Git Console:
+  - ✅ M7a — Persistent settings panel (gear button): max commits, default apply mode, EOL markers, auto-fetch on open, dark/light theme
+  - ✅ Dark/light theme via CSS custom properties; sub-windows load settings independently
+  - ✅ All UI text in English
+  - ✅ Git Console (`>_` toolbar button): realtime git command log grouped by RPC operation with branch/target context; stored in `%APPDATA%/com.lazycherrypick.app/git.log`
 
 ## License
 

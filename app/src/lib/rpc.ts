@@ -23,6 +23,7 @@ import type {
   ContinueCherryResult,
   FileContentResult,
   WriteAndStageResult,
+  AppSettings,
 } from "./rpc-types";
 
 export class RpcCallError extends Error {
@@ -47,6 +48,11 @@ export const rpc = {
   recents: {
     load: () => invoke<RecentRepo[]>("recents_load"),
     save: (items: RecentRepo[]) => invoke<void>("recents_save", { recents: items }),
+  },
+
+  settings: {
+    load: () => invoke<AppSettings>("settings_load"),
+    save: (settings: AppSettings) => invoke<void>("settings_save", { settings }),
   },
 
   git: {

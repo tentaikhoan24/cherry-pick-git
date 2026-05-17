@@ -37,15 +37,17 @@ func (r *Repo) CommitDetail(ctx context.Context, args CommitDetailArgs) (*Commit
 		return nil, &Error{Code: CodeGitCommandFailed, Message: "unexpected git log output for " + args.Sha}
 	}
 	ts, _ := strconv.ParseInt(strings.TrimSpace(parts[4]), 10, 64)
+	parents := []string{}
+	if p := strings.TrimSpace(parts[1]); p != "" {
+		parents = strings.Fields(p)
+	}
 	d := &CommitDetail{
 		Sha:     strings.TrimSpace(parts[0]),
+		Parents: parents,
 		Author:  parts[2],
 		Email:   parts[3],
 		Time:    ts,
 		Subject: parts[5],
-	}
-	if p := strings.TrimSpace(parts[1]); p != "" {
-		d.Parents = strings.Fields(p)
 	}
 	if len(parts) == 7 {
 		d.Body = strings.TrimSpace(parts[6])

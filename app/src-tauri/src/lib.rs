@@ -80,7 +80,53 @@ async fn sidecar_call(
                 break;
             }
             CommandEvent::Stderr(bytes) => {
-                eprintln!("sidecar[stderr]: {}", String::from_utf8_lossy(&bytes));
+                let line = String::from_utf8_lossy(&bytes);
+                let line = line.trim();
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                if let Some(rest) = line.strip_prefix("[GIT_CMD] ") {
+                    // Format: <ms>|<branch>|git <args>
+                    let parts: Vec<&str> = rest.splitn(3, '|').collect();
+                    let (ms, branch, cmd) = if parts.len() == 3 {
+                        let ms_val: Option<u64> = parts[0].parse().ok();
+                        let br = if parts[1].is_empty() { None } else { Some(parts[1]) };
+                        (ms_val, br, parts[2].to_string())
+                    } else {
+                        (None, None, rest.to_string())
+                    };
+                    let _ = app.emit("git-log", serde_json::json!({
+                        "ts": ts, "type": "cmd", "cmd": cmd,
+                        "branch": branch, "ms": ms
+                    }));
+                    if let Ok(path) = git_log_file(&app) {
+                        if let Some(parent) = path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path)
+                        {
+                            let _ = writeln!(f, "cmd {} {}", ts, rest);
+                        }
+                    }
+                } else if let Some(info) = line.strip_prefix("[GIT_INFO] ") {
+                    let _ = app.emit("git-log", serde_json::json!({ "ts": ts, "type": "info", "cmd": info }));
+                    if let Ok(path) = git_log_file(&app) {
+                        if let Some(parent) = path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path)
+                        {
+                            let _ = writeln!(f, "info {} {}", ts, info);
+                        }
+                    }
+                } else {
+                    eprintln!("sidecar[stderr]: {}", line);
+                }
             }
             CommandEvent::Terminated(payload) => {
                 app.state::<ActiveSidecar>().0.lock().unwrap().remove(&call_id);
@@ -113,6 +159,133 @@ async fn sidecar_cancel(app: tauri::AppHandle) -> Result<(), String> {
     for (_, child) in children {
         let _ = child.kill();
     }
+    Ok(())
+}
+
+// ── git command log ───────────────────────────────────────────────────────────
+
+fn git_log_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let mut p = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir failed: {e}"))?;
+    p.push("git.log");
+    Ok(p)
+}
+
+#[tauri::command]
+fn git_log_read(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let path = git_log_file(&app)?;
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let data = fs::read_to_string(&path).map_err(|e| format!("read git log failed: {e}"))?;
+    let entries: Vec<serde_json::Value> = data
+        .lines()
+        .rev()
+        .take(1000)
+        .filter_map(|line| {
+            // Format: "<type> <ts> <rest>"
+            // For cmd: rest = "<ms>|<branch>|git <args>"
+            // For info: rest = "<label>"
+            let mut parts = line.splitn(3, ' ');
+            let kind = parts.next()?;
+            let ts: u64 = parts.next()?.parse().ok()?;
+            let rest = parts.next().unwrap_or("");
+            if kind == "cmd" {
+                let sub: Vec<&str> = rest.splitn(3, '|').collect();
+                let (ms, branch, cmd) = if sub.len() == 3 {
+                    let ms_val: Option<u64> = sub[0].parse().ok();
+                    let br = if sub[1].is_empty() { None } else { Some(sub[1]) };
+                    (ms_val, br, sub[2].to_string())
+                } else {
+                    (None, None, rest.to_string())
+                };
+                Some(serde_json::json!({ "ts": ts, "type": "cmd", "cmd": cmd, "branch": branch, "ms": ms }))
+            } else {
+                Some(serde_json::json!({ "ts": ts, "type": kind, "cmd": rest }))
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    Ok(entries)
+}
+
+#[tauri::command]
+fn git_log_clear(app: tauri::AppHandle) -> Result<(), String> {
+    let path = git_log_file(&app)?;
+    if path.exists() {
+        fs::write(&path, "").map_err(|e| format!("clear git log failed: {e}"))?;
+    }
+    Ok(())
+}
+
+// ── app settings ─────────────────────────────────────────────────────────────
+
+fn default_max_commits() -> u32 { 100 }
+fn default_apply_mode() -> String { "apply".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppSettings {
+    #[serde(rename = "maxCommits", default = "default_max_commits")]
+    max_commits: u32,
+    #[serde(rename = "defaultApplyMode", default = "default_apply_mode")]
+    default_apply_mode: String,
+    #[serde(rename = "showEolMarkers", default)]
+    show_eol_markers: bool,
+    #[serde(rename = "autoFetchOnOpen", default)]
+    auto_fetch_on_open: bool,
+    #[serde(default = "default_theme")]
+    theme: String,
+}
+
+fn default_theme() -> String { "dark".to_string() }
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            max_commits: default_max_commits(),
+            default_apply_mode: default_apply_mode(),
+            show_eol_markers: false,
+            auto_fetch_on_open: false,
+            theme: default_theme(),
+        }
+    }
+}
+
+fn settings_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let mut p = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir failed: {e}"))?;
+    p.push("settings.json");
+    Ok(p)
+}
+
+#[tauri::command]
+fn settings_load(app: tauri::AppHandle) -> Result<AppSettings, String> {
+    let path = settings_file(&app)?;
+    if !path.exists() {
+        return Ok(AppSettings::default());
+    }
+    let data = fs::read_to_string(&path).map_err(|e| format!("read settings failed: {e}"))?;
+    serde_json::from_str(&data).map_err(|_| {
+        // Corrupted file — return defaults rather than hard-erroring.
+        "".to_string()
+    }).or_else(|_| Ok(AppSettings::default()))
+}
+
+#[tauri::command]
+fn settings_save(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+    let path = settings_file(&app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create dir failed: {e}"))?;
+    }
+    let data =
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("serialize failed: {e}"))?;
+    fs::write(&path, data).map_err(|e| format!("write settings failed: {e}"))?;
     Ok(())
 }
 
@@ -170,6 +343,10 @@ pub fn run() {
             sidecar_cancel,
             recents_load,
             recents_save,
+            settings_load,
+            settings_save,
+            git_log_read,
+            git_log_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

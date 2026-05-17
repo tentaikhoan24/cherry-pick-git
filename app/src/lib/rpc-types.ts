@@ -144,6 +144,14 @@ export interface WriteAndStageResult {
   staged: boolean;
 }
 
+export interface AppSettings {
+  maxCommits: number;
+  defaultApplyMode: "apply" | "apply-push";
+  showEolMarkers: boolean;
+  autoFetchOnOpen: boolean;
+  theme: "dark" | "light";
+}
+
 export interface RpcError {
   code: number;
   message: string;

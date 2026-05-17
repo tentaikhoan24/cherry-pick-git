@@ -11,6 +11,7 @@
   let error = $state("");
   let leftLabel = $state("Before");
   let rightLabel = $state("After");
+  let initialShowEol = $state(false);
 
   onMount(async () => {
     const p = new URLSearchParams(window.location.search);
@@ -26,6 +27,12 @@
     const staged = p.get("staged") === "true";
     leftLabel = staged ? "HEAD" : "Before";
     rightLabel = staged ? "Staged" : (sha.slice(0, 8) || "Commit");
+
+    try {
+      const s = await rpc.settings.load();
+      initialShowEol = s.showEolMarkers;
+      document.body.classList.toggle("light", s.theme === "light");
+    } catch { /* ignore */ }
 
     if (!repo || !filePath || (!staged && !sha)) {
       error = "Missing parameters";
@@ -54,6 +61,7 @@
       {loading}
       {leftLabel}
       {rightLabel}
+      {initialShowEol}
       onback={() => getCurrentWindow().close()}
     />
   {/if}
@@ -70,12 +78,30 @@
     --border-subtle: #2e2e2e;
     --toolbar-bg: #252525;
     --input-bg: #2a2a2a;
-    --hover: #2a2a2a;
+    --hover: #333333;
     --selected: #1a2a4a;
     --accent: #4a7ef5;
     --text: #f0f0f0;
     --text-secondary: #ccc;
     --text-muted: #888;
+    --surface: #252525;
+    --surface-elevated: #2c2c2c;
+  }
+  :global(body.light) {
+    background: #f5f5f5;
+    color: #1a1a1a;
+    --border: #d0d0d0;
+    --border-subtle: #e4e4e4;
+    --toolbar-bg: #ffffff;
+    --input-bg: #eeeeee;
+    --hover: #e4e4e4;
+    --selected: #dce8ff;
+    --accent: #2563eb;
+    --text: #1a1a1a;
+    --text-secondary: #444;
+    --text-muted: #888;
+    --surface: #ffffff;
+    --surface-elevated: #f8f8f8;
   }
   .diff-window {
     position: fixed;

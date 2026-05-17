@@ -19,16 +19,17 @@
     onback: () => void;
     leftLabel?: string;
     rightLabel?: string;
+    initialShowEol?: boolean;
   }
 
-  let { diff, file, loading, onback, leftLabel = "Before", rightLabel = "After" }: Props = $props();
+  let { diff, file, loading, onback, leftLabel = "Before", rightLabel = "After", initialShowEol = false }: Props = $props();
 
   const statusColor: Record<string, string> = {
     A: "#66bb6a", D: "#ef5350", M: "#ffa726", R: "#42a5f5", C: "#ab47bc",
   };
 
   // ── Show/hide line endings toggle ─────────────────────────────────
-  let showLineEndings = $state(false);
+  let showLineEndings = $state(initialShowEol);
 
   const NO_NL = "\x00NONL"; // sentinel: line has no trailing newline
 

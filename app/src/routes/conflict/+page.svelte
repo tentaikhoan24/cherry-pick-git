@@ -396,6 +396,7 @@
     repo = p.get("repo") ?? "";
     file = p.get("file") ?? "";
     if (!repo || !file) { loading = false; error = "Missing parameters"; return; }
+    try { const s = await rpc.settings.load(); document.body.classList.toggle("light", s.theme === "light"); } catch { /* ignore */ }
     try {
       const r = await rpc.git.fileContent(repo, file);
       const parsed = parse(r.content);
@@ -444,34 +445,34 @@
       {@const fullBlock = thisSide === "left" ? conflicts[ctxMenu.ci].theirs : conflicts[ctxMenu.ci].ours}
       {#if ctxMenu.selLines.length < fullBlock.length}
         <button class="ctx-item" onclick={menuUseSelected}>
-          Dùng dòng đã chọn bên {thisLabel} <span class="ctx-badge">{ctxMenu.selLines.length} dòng</span>
+          Use selected lines from {thisLabel} <span class="ctx-badge">{ctxMenu.selLines.length} line{ctxMenu.selLines.length === 1 ? "" : "s"}</span>
         </button>
         <div class="ctx-sep"></div>
       {/if}
     {/if}
 
     <button class="ctx-item" onclick={() => menuUseWhole(thisSide)}>
-      Dùng toàn bộ block {thisLabel}
+      Use entire block from {thisLabel}
     </button>
     <button class="ctx-item" onclick={() => menuUseWhole(otherSide)}>
-      Dùng toàn bộ block {otherLabel}
+      Use entire block from {otherLabel}
     </button>
     <div class="ctx-sep"></div>
     <button class="ctx-item" onclick={() => menuUseCombined(thisSide === "left" ? "lt" : "tl")}>
-      Toàn bộ {thisLabel} trước · {otherLabel} sau
+      {thisLabel} first · {otherLabel} after
     </button>
     <button class="ctx-item" onclick={() => menuUseCombined(thisSide === "left" ? "tl" : "lt")}>
-      Toàn bộ {otherLabel} trước · {thisLabel} sau
+      {otherLabel} first · {thisLabel} after
     </button>
 
     {#if hasCross}
       <div class="ctx-sep"></div>
-      <div class="ctx-hint">Kết hợp dòng đã chọn từ 2 pane:</div>
+      <div class="ctx-hint">Combine selected lines from both panes:</div>
       <button class="ctx-item ctx-cross" onclick={() => menuUseCrossPane("this-other")}>
-        {thisLabel} đã chọn ({ctxMenu.selLines.length}) trước · {otherLabel} ({ctxMenu.otherSelLines.length}) sau
+        {thisLabel} selected ({ctxMenu.selLines.length}) first · {otherLabel} ({ctxMenu.otherSelLines.length}) after
       </button>
       <button class="ctx-item ctx-cross" onclick={() => menuUseCrossPane("other-this")}>
-        {otherLabel} đã chọn ({ctxMenu.otherSelLines.length}) trước · {thisLabel} ({ctxMenu.selLines.length}) sau
+        {otherLabel} selected ({ctxMenu.otherSelLines.length}) first · {thisLabel} ({ctxMenu.selLines.length}) after
       </button>
     {/if}
   </div>
@@ -482,14 +483,14 @@
 
   <!-- Toolbar -->
   <div class="toolbar">
-    <button class="tb-btn nav" onclick={prevConflict} disabled={currentConflict === 0} title="Conflict trước (↑)">▲</button>
-    <button class="tb-btn nav" onclick={nextConflict} disabled={currentConflict >= totalConflicts - 1} title="Conflict tiếp (↓)">▼</button>
+    <button class="tb-btn nav" onclick={prevConflict} disabled={currentConflict === 0} title="Previous conflict (↑)">▲</button>
+    <button class="tb-btn nav" onclick={nextConflict} disabled={currentConflict >= totalConflicts - 1} title="Next conflict (↓)">▼</button>
     <span class="counter">{totalConflicts > 0 ? `${currentConflict + 1} / ${totalConflicts}` : "–"}</span>
 
     <div class="tb-sep"></div>
-    <button class="tb-btn btn-theirs" onclick={() => blockUseTheirs(currentConflict)} disabled={totalConflicts === 0} title="Dùng toàn bộ Theirs">← Theirs</button>
-    <button class="tb-btn btn-ours"   onclick={() => blockUseOurs(currentConflict)}   disabled={totalConflicts === 0} title="Dùng toàn bộ Ours">Ours →</button>
-    <button class="tb-btn btn-both"   onclick={() => blockUseBoth(currentConflict)}   disabled={totalConflicts === 0} title="Ghép: Theirs → Ours">← + →</button>
+    <button class="tb-btn btn-theirs" onclick={() => blockUseTheirs(currentConflict)} disabled={totalConflicts === 0} title="Use all Theirs">← Theirs</button>
+    <button class="tb-btn btn-ours"   onclick={() => blockUseOurs(currentConflict)}   disabled={totalConflicts === 0} title="Use all Ours">Ours →</button>
+    <button class="tb-btn btn-both"   onclick={() => blockUseBoth(currentConflict)}   disabled={totalConflicts === 0} title="Combine: Theirs + Ours">← + →</button>
 
     <div class="tb-flex-gap"></div>
 
@@ -498,16 +499,16 @@
 
     {#if hasUnresolved}
       {@const pendingCount = totalConflicts - provisionalChoices.size}
-      <span class="badge-warn">⚠ {pendingCount} chưa giải quyết</span>
+      <span class="badge-warn">⚠ {pendingCount} unresolved</span>
     {:else if saved}
-      <span class="badge-saved">✓ Đã lưu</span>
+      <span class="badge-saved">✓ Saved</span>
     {:else}
-      <span class="badge-ok">✓ Sẵn sàng lưu</span>
+      <span class="badge-ok">✓ Ready to save</span>
     {/if}
 
     <div class="tb-sep"></div>
     <button class="tb-btn btn-save" onclick={save} disabled={hasUnresolved || applying || saved}>
-      {applying ? "Đang lưu…" : "Lưu & Stage"}
+      {applying ? "Saving…" : "Save & Stage"}
     </button>
     <button class="tb-btn btn-close" onclick={() => getCurrentWindow().close()}>✕</button>
   </div>
@@ -517,9 +518,9 @@
   {/if}
 
   {#if loading}
-    <div class="state-msg">Đang tải…</div>
+    <div class="state-msg">Loading…</div>
   {:else if totalConflicts === 0}
-    <div class="state-msg">Không tìm thấy conflict marker.</div>
+    <div class="state-msg">No conflict markers found.</div>
   {:else}
     <!-- ── Top panes ── -->
     <div class="top-panes" style="flex: {topFlex} 1 0">
@@ -599,12 +600,12 @@
 
     <!-- ── Resizable H-divider ── -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="h-divider" onmousedown={onHDividerDown} title="Kéo để thay đổi kích thước"></div>
+    <div class="h-divider" onmousedown={onHDividerDown} title="Drag to resize"></div>
 
     <!-- ── Bottom: Merged result ── -->
     <div class="bottom-pane" style="flex: {100 - topFlex} 1 0">
       <div class="pane-hdr merged-hdr">
-        <span>Kết quả merge</span>
+        <span>Merge result</span>
         <button class="raw-toggle" onclick={toggleRaw}>
           {showRaw ? "◧ Visual" : "✎ Raw"}
         </button>
@@ -720,6 +721,25 @@
     position: fixed; inset: 0;
     display: flex; flex-direction: column; overflow: hidden;
   }
+
+  /* ── Light theme overrides (toolbar chrome only; editor panes stay dark) ── */
+  :global(body.light) .toolbar { background: #ffffff; border-bottom-color: #d0d0d0; }
+  :global(body.light) .tb-btn { background: #eeeeee; border-color: #d0d0d0; color: #444; }
+  :global(body.light) .tb-btn.btn-save:disabled { background: #eeeeee; border-color: #d0d0d0; color: #aaa; }
+  :global(body.light) .tb-btn.btn-close { color: #aaa; }
+  :global(body.light) .tb-btn.btn-close:hover { color: #444; }
+  :global(body.light) .tb-sep { background: #d0d0d0; }
+  :global(body.light) .counter { color: #888; }
+  :global(body.light) .file-label { color: #666; }
+  :global(body.light) .error-bar { background: rgba(239,83,80,.06); }
+  :global(body.light) .state-msg { color: #aaa; }
+  :global(body.light) .raw-toggle { background: #eeeeee; border-color: #d0d0d0; color: #888; }
+  :global(body.light) .raw-toggle:hover { color: #444; border-color: #aaa; }
+  :global(body.light) .ctx-menu { background: #ffffff; border-color: #d0d0d0; box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+  :global(body.light) .ctx-item { color: #1a1a1a; }
+  :global(body.light) .ctx-item:hover { background: #e8e8e8; }
+  :global(body.light) .ctx-sep { background: #d0d0d0; }
+  :global(body.light) .ctx-hint { color: #888; }
 
   /* ── Toolbar ──────────────────────────────────────────────── */
   .toolbar {

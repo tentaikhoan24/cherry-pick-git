@@ -45,7 +45,7 @@
         <span class="meta-key">Date</span>
         <span class="meta-val mono">{fmt(detail.time)}</span>
 
-        {#if detail.parents.length > 0}
+        {#if (detail.parents ?? []).length > 0}
           <span class="meta-key">Parent{detail.parents.length > 1 ? "s" : ""}</span>
           <span class="meta-val mono">{detail.parents.map((p) => p.slice(0, 7)).join("  ")}</span>
         {/if}

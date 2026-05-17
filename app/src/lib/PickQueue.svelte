@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Branch, Commit, CherryPickProgress, DryRunItem } from "./rpc-types";
+  import BranchSelect from "./BranchSelect.svelte";
 
   interface Props {
     queue: Commit[];
@@ -9,6 +10,7 @@
     busy: boolean;
     progress: CherryPickProgress | null;
     dryRunMap: Map<string, DryRunItem>;
+    defaultApplyMode?: "apply" | "apply-push";
     ontargetbranch: (branch: string) => void;
     onremove: (sha: string) => void;
     onapply: () => void;
@@ -17,12 +19,12 @@
     oncreate: (name: string, base: string) => void;
   }
 
-  let { queue, branches, targetBranch, sourceBranch, busy, progress, dryRunMap, ontargetbranch, onremove, onapply, onapplypush, oncancel, oncreate }: Props = $props();
+  let { queue, branches, targetBranch, sourceBranch, busy, progress, dryRunMap, defaultApplyMode = "apply", ontargetbranch, onremove, onapply, onapplypush, oncancel, oncreate }: Props = $props();
 
   const canApply = $derived(queue.length > 0 && targetBranch !== sourceBranch && !busy);
 
   let dropdownOpen = $state(false);
-  let mode = $state<"apply" | "apply-push">("apply");
+  let mode = $state<"apply" | "apply-push">(defaultApplyMode);
 
   const btnLabel = $derived(
     mode === "apply-push"
@@ -86,18 +88,13 @@
 
 <div class="panel">
   <div class="panel-header">
-    <label class="label" for="target-branch">Target branch</label>
-    <select
-      id="target-branch"
-      class="branch-select"
+    <label class="label">Target branch</label>
+    <BranchSelect
+      branches={branches}
       value={targetBranch}
-      onchange={(e) => ontargetbranch((e.target as HTMLSelectElement).value)}
       disabled={branches.length === 0 || busy || creatingBranch}
-    >
-      {#each branches as b}
-        <option value={b.name}>{b.name}{b.isHead ? " (current)" : ""}</option>
-      {/each}
-    </select>
+      onchange={ontargetbranch}
+    />
     <button
       class="new-branch-btn"
       onclick={openCreateForm}
@@ -302,17 +299,6 @@
     color: var(--text-secondary, #aaa);
     white-space: nowrap;
   }
-  .branch-select {
-    flex: 1;
-    min-width: 0;
-    padding: 0.3rem 0.5rem;
-    border-radius: 5px;
-    border: 1px solid var(--border, #555);
-    background: var(--input-bg, #2a2a2a);
-    color: var(--text, #f0f0f0);
-    font-size: 0.85rem;
-    font-family: ui-monospace, monospace;
-  }
   .queue-body {
     flex: 1;
     overflow-y: auto;
@@ -492,7 +478,7 @@
     bottom: calc(100% + 4px);
     right: 0;
     min-width: 160px;
-    background: #2c2c2c;
+    background: var(--surface-elevated, #2c2c2c);
     border: 1px solid var(--border, #3a3a3a);
     border-radius: 7px;
     list-style: none;

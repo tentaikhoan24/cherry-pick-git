@@ -4,7 +4,7 @@ Context for AI-assisted development on `lazy-cherry-pick`. Read this first when 
 
 ## In one paragraph
 
-A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M5 mostly done: commit detail panels, dry-run conflict preview, 2-panel side-by-side diff viewer (TortoiseGit-style with EOL markers + trailing-newline transform), conflict resolver UI (3-way merge editor), staged diff for resolved files, Create Branch button, and all M4 features (progress bar, Cancel, Fetch/Pull, recent repos).
+A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M7 done: persistent app settings (maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, dark/light theme) via Rust `settings_load/save`; gear button in toolbar; full light-theme support via CSS custom properties; Git Console panel (realtime git command log, grouped by RPC call with branch/target context, stored in `%APPDATA%/com.lazycherrypick.app/git.log`). All UI text in English.
 
 ## File map
 
@@ -21,9 +21,11 @@ A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a
 | `app/src/lib/CommitFiles.svelte` | File list for a commit with status badge (+/- stats), click to open diff |
 | `app/src/lib/FileDiff.svelte` | 2-panel side-by-side diff renderer (TortoiseGit-style): sync scroll, EOL marker toggle (¶), trailing-newline transform |
 | `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort; resolved files open staged diff |
+| `app/src/lib/Settings.svelte` | Settings modal — maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme (Dark/Light) |
+| `app/src/lib/GitConsole.svelte` | Git Console panel — realtime git command log grouped by RPC call; load history from file; Clear button |
 | `app/src/lib/rpc.ts` | Typed wrapper around `invoke('sidecar_call', ...)` + direct Tauri commands |
 | `app/src/lib/rpc-types.ts` | TypeScript types mirroring Go sidecar types |
-| `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (multi-line reader + cp-progress events), `sidecar_cancel`, `recents_load/save` |
+| `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (stderr `[GIT_CMD]`/`[GIT_INFO]` parsing + git-log events + file append), `settings_load/save`, `git_log_read/clear`, `recents_load/save` |
 | `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tokio` |
 | `app/src-tauri/tauri.conf.json` | `bundle.externalBin: ["binaries/sidecar"]` |
 | `app/src-tauri/capabilities/default.json` | `shell:allow-*` for sidecar + `dialog:allow-open`; window globs: `diff-*`, `conflict-*` |
@@ -97,7 +99,9 @@ cargo build
 - **Concurrent sidecar calls are safe.** `ActiveSidecar` is `Mutex<HashMap<u64, CommandChild>>` with a per-call atomic `call_id`. Each call stores its child by `call_id` and removes only its own entry on finish — concurrent calls from multiple windows (e.g. main + conflict editor) cannot kill each other's processes. `sidecar_cancel` drains the entire map.
 - **Progress protocol:** intermediate lines carry `"progress"` field (not `"result"/"error"`) with the same `id`. Rust detects by `parsed.get("progress").is_some()`. Frontend listens via `@tauri-apps/api/event` `listen("cp-progress", ...)`.
 - **Cancel:** `sidecar_cancel` Tauri command drains `ActiveSidecar` (`Mutex<HashMap<u64, CommandChild>>`), killing all active children. Frontend then calls `git.abort` via a new sidecar spawn to run `git cherry-pick --abort`.
-- **Recent repos:** stored in `%APPDATA%/lazy-cherry-pick/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
+- **Recent repos:** stored in `%APPDATA%/com.lazycherrypick.app/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
+- **App settings:** stored in `%APPDATA%/com.lazycherrypick.app/settings.json` by Rust `settings_load`/`settings_save`. Fields: `maxCommits`, `defaultApplyMode`, `showEolMarkers`, `autoFetchOnOpen`, `theme`. Returns defaults on missing/corrupted file.
+- **Git command log:** sidecar emits `[GIT_CMD] git <args>` (without `-C dir`) and `[GIT_INFO] git.method → branch` to stderr. Rust batchs stdout (RPC protocol) and stderr separately — stderr lines with those prefixes are emitted as Tauri `git-log` events and appended to `%APPDATA%/com.lazycherrypick.app/git.log`. Format per line: `<type> <unix-ts> <content>` where type is `cmd` or `info`.
 - **Sidecar logs to stderr, responses to stdout.** Don't write logs to stdout.
 - **Capabilities are scoped to `binaries/sidecar`.** Don't broaden to `shell:default`.
 - **Write operations require explicit user action.** `git.cherryPick` is only triggered by the Apply button — never called automatically. Read methods (`git.status`, `git.commits`, `git.fetch`) are fine to call on load/branch-change.
@@ -144,7 +148,24 @@ cargo build
   - **Trailing-newline transform (Option D + lookahead)**: when a paired `change` row has `leftText === rightText` but EOL differs ("none" vs "lf"/"crlf"), convert to `ctx` row + phantom empty `change` row (representing the implicit empty line that appears/disappears with the trailing newline). Lookahead skips the phantom if the next row is already an empty del/add — prevents double-counting when the diff covers both an empty line AND the trailing newline. Matches TortoiseGit's "editor view" rather than git's "lost trailing newline" view. See `design-side-by-side-diff` memory.
   - **Raw-mode save fix in conflict editor**: setting `rawEdited = false` after successful save prevents the "blank screen" bug when toggling back to visual mode.
 
-**Not done**: smart filter UI, settings, packaging, signing.
+**M6 done**:
+- **Checkbox hit area fix**: Wrapped `<input type="checkbox">` in `<label class="cb-wrap">` with extra padding — click area ~36×36px instead of 14×14px. Row `align-items` changed to `center`.
+- **BranchSelect component** (`app/src/lib/BranchSelect.svelte`): Custom searchable dropdown replacing native `<select>` in both CommitList (source) and PickQueue (target). Type to filter by name; ↑↓/Enter/Escape keyboard nav; click-outside closes.
+- **M6a — Commit filter bar**: Collapsible filter bar in CommitList header. Fields: Author, Message (keyword/regex), Since, Until, Path (glob). `Filter (N)` badge button toggles bar; Apply/Clear; Enter key submits. Filter state held in `+page.svelte` as `activeFilter: CommitFilter`; passed to `rpc.git.commits(..., filter)`; resets on source branch change.
+- **M6b — Filter presets**: Save/load named filter presets stored in `localStorage` key `lcp-filter-presets`. "+ Save" button → inline name input → Enter to save. "Presets (N) ▾" dropdown lists saved presets; click to load; trash icon to delete. Persists across app restarts. **Active preset UX** (post-M6 polish): Presets button shows active preset name (highlighted accent color) instead of count; when preset is loaded and filter fields are modified, "+ Save" becomes a "Save | ▾" split-button — left click overwrites the active preset, ▾ opens dropdown with "Save [name]" (overwrite) and "Save as…" (new name input). State: `activePresetName: string | null`, `filtersDirtyFromPreset: boolean` (derived).
+- **M6c — Commit badges**: `getBadge(subject)` in CommitList detects conventional commit prefix (`feat|fix|docs|style|refactor|perf|test|build|ci|chore`) and JIRA pattern (`[ABC-123]`); strips prefix from displayed subject. Colors: feat=green, fix=red, docs=blue, test=purple, perf=yellow, chore/…=gray, breaking `!`=dark red, JIRA=light blue. Uses `{@const badge = getBadge(c.subject)}` at `{#each}` level.
+- **Bug fix — root commit loading**: Root commit `nil` parents slice → JSON `null` → `detail.parents.length` TypeError in Svelte → component stuck at "Loading...". Fix: Go initializes `parents := []string{}`; frontend adds `(detail.parents ?? [])` guard in `CommitDetail.svelte`.
+- **Build & CI fixes**: `build/build.ps1` — fixed project name in comment, added PATH setup, added `go test` gate. `releases/*.md` — fixed path `.\build.ps1` → `.\build\build.ps1`. `.github/workflows/release.yml` — Go `1.21`→`1.23`, Node `lts/*`→`'22'`, `tauri-action@v0`→`v0.5`, added `go test` step.
+- **gitignore**: Added `app/src-tauri/binaries/*.exe` — sidecar binary is a build artifact, not tracked in git.
+- **TestCherryPick_Conflict updated**: Test was written for M4 behavior (auto-abort on conflict). M5 leaves repo in conflict state. Test now asserts dirty after conflict → calls `Abort()` → asserts clean.
+
+**M7 done**:
+- **M7a — Settings panel**: `AppSettings` struct in Rust (`maxCommits`, `defaultApplyMode`, `showEolMarkers`, `autoFetchOnOpen`, `theme`). `settings_load`/`settings_save` Tauri commands write `%APPDATA%/com.lazycherrypick.app/settings.json`; returns defaults on missing/corrupted file. `Settings.svelte` modal with number input, select, toggle switches, Dark/Light segmented control. Gear button in `Toolbar.svelte`. `+page.svelte` applies settings: `$effect` toggles `body.light` class; `loadCommits` uses `settings.maxCommits`; `openRepo` calls `git.fetch` if `autoFetchOnOpen`; PickQueue uses `defaultApplyMode`; FileDiff uses `initialShowEol`.
+- **Theme (dark/light)**: CSS custom properties (`--surface`, `--surface-elevated`, `--border`, `--toolbar-bg`, `--input-bg`, `--hover`, `--selected`, `--accent`, `--text`, `--text-secondary`, `--text-muted`) defined on `:global(body)` for dark; `body.light` block overrides all. Sub-windows (`diff/`, `conflict/`) load settings independently in `onMount` and apply class to `document.body`. Conflict editor panes kept dark regardless of theme (code readability). `var(--surface-elevated)` used in all dropdown menus across components.
+- **English UI**: All Vietnamese text translated to English across all `.svelte` files.
+- **Git Console**: `GitConsole.svelte` panel (180px, always dark). Toggle button (`>_`) in Toolbar with active state. Go `exec.go` logs `[GIT_CMD] git <args>` (without `-C dir`) to stderr before each git exec. `server.go` logs `[GIT_INFO] git.method → target/branch` to stderr before each `git.*` dispatch. Rust parses both prefixes from `CommandEvent::Stderr`, emits `git-log` event `{ts, type, cmd}`, appends `<type> <ts> <cmd>` to `git.log`. Frontend loads history via `git_log_read` on mount, listens `git-log` for realtime. Renders `info` entries as group headers (method + branch), `cmd` entries as indented lines with `git` (dim) + subcommand (cyan bold) + args (gray). Auto-scroll with pause when user scrolls up. `git_log_clear` Tauri command truncates the file.
+
+**Not done**: packaging, signing.
 
 See README roadmap for M5+ scope.
 

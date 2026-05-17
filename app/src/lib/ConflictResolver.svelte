@@ -125,7 +125,7 @@
     <span class="progress-text">
       {resolvedCount}/{files.length} file{files.length === 1 ? "" : "s"} resolved
       {#if remainingCommits.length > 0}
-        <span class="upcoming-hint">· còn {remainingCommits.length} commit tiếp theo</span>
+        <span class="upcoming-hint">· {remainingCommits.length} more commit{remainingCommits.length === 1 ? "" : "s"} pending</span>
       {/if}
     </span>
     <div class="actions">
@@ -317,9 +317,9 @@
   }
   .resolve-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .resolve-btn.ours {
-    border-color: #444;
-    background: #2a2a2a;
-    color: #ccc;
+    border-color: var(--border, #444);
+    background: var(--input-bg, #2a2a2a);
+    color: var(--text-secondary, #ccc);
   }
   .resolve-btn.ours:not(:disabled):hover { background: #3a3a3a; }
   .resolve-btn.theirs {

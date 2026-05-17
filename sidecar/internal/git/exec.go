@@ -4,13 +4,23 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/lazy-cherry-pick/sidecar/internal/rpc"
 )
 
 // run executes `git <args...>` in directory dir (if non-empty) and returns
 // stdout on success. On failure it returns a *Error containing stderr and the
 // exit code so callers can decide whether to translate or surface it.
+// logCmd emits a [GIT_CMD] line to stderr after a git command completes.
+// Format: [GIT_CMD] <ms>|<branch>|git <args>
+func logCmd(ctx context.Context, args []string, ms int64) {
+	fmt.Fprintf(os.Stderr, "[GIT_CMD] %d|%s|git %s\n", ms, rpc.BranchFromCtx(ctx), strings.Join(args, " "))
+}
+
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	full := args
 	if dir != "" {
@@ -20,7 +30,10 @@ func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	start := time.Now()
+	runErr := cmd.Run()
+	logCmd(ctx, args, time.Since(start).Milliseconds())
+	if runErr != nil {
 		exitCode := -1
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
@@ -53,7 +66,10 @@ func runWithStdin(ctx context.Context, dir string, stdin []byte, args ...string)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	start := time.Now()
+	runErr := cmd.Run()
+	logCmd(ctx, args, time.Since(start).Milliseconds())
+	if runErr != nil {
 		exitCode := -1
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()

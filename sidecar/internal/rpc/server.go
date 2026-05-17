@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -65,6 +67,22 @@ type progressLine struct {
 	Progress any             `json:"progress"`
 }
 
+// branchCtxKey is the context key for the current git HEAD branch.
+type branchCtxKey struct{}
+
+// WithBranch stores the current branch in ctx so git command loggers can read it.
+func WithBranch(ctx context.Context, branch string) context.Context {
+	return context.WithValue(ctx, branchCtxKey{}, branch)
+}
+
+// BranchFromCtx returns the branch stored by WithBranch, or "" if none.
+func BranchFromCtx(ctx context.Context) string {
+	if b, ok := ctx.Value(branchCtxKey{}).(string); ok {
+		return b
+	}
+	return ""
+}
+
 type Server struct {
 	handlers map[string]Handler
 }
@@ -111,6 +129,33 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out, errOut io.Writer)
 }
 
 func (s *Server) dispatch(ctx context.Context, req *Request, enc *json.Encoder) {
+	// For git.* methods: emit a group-header line and inject the current HEAD
+	// branch into ctx so individual [GIT_CMD] lines can include it.
+	if strings.HasPrefix(req.Method, "git.") && req.Params != nil {
+		var p struct {
+			Repo   string `json:"repo"`
+			Target string `json:"target"`
+			Branch string `json:"branch"`
+		}
+		if json.Unmarshal(req.Params, &p) == nil {
+			label := req.Method
+			if p.Target != "" {
+				label += " → " + p.Target
+			} else if p.Branch != "" {
+				label += " [" + p.Branch + "]"
+			}
+			fmt.Fprintf(os.Stderr, "[GIT_INFO] %s\n", label)
+
+			// Get current HEAD branch (one exec per RPC call, not per git command).
+			if p.Repo != "" {
+				gcmd := exec.Command("git", "-C", p.Repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+				if out, err := gcmd.Output(); err == nil {
+					ctx = WithBranch(ctx, strings.TrimSpace(string(out)))
+				}
+			}
+		}
+	}
+
 	// Inject a progress writer so handlers can emit intermediate notifications.
 	pw := ProgressWriter(func(v any) error {
 		return enc.Encode(progressLine{JSONRPC: "2.0", ID: req.ID, Progress: v})
