@@ -48,3 +48,5 @@ tmp/
 out/
 bin/
 text.txt
+*vn.*
+*VN.*
