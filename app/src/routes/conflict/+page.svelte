@@ -40,8 +40,8 @@
   let applying = $state(false);
   let saved = $state(false);
   let showRaw = $state(false);
-  let rawContainer = $state<HTMLElement | null>(null);
-  let rawHasConflict = $state(false);
+  let rawEdited = false;       // non-reactive: track if user typed anything in raw mode
+  let mergedViewRef = $state<HTMLElement | null>(null);
 
   let parts = $state<Part[]>([]);
   let mergedText = $state("");   // kept with conflict markers; only finalized at save
@@ -98,9 +98,7 @@
   // ── Derived ────────────────────────────────────────────────────
   const conflicts      = $derived(parts.filter((p): p is ConflictPart => p.kind === "conflict"));
   const totalConflicts = $derived(conflicts.length);
-  const hasUnresolved  = $derived(
-    showRaw ? rawHasConflict : provisionalChoices.size < totalConflicts
-  );
+  const hasUnresolved  = $derived(provisionalChoices.size < totalConflicts);
 
   // ── Build render lines with line numbers ───────────────────────
   function buildRenderLines(parts: Part[]): Rendered {
@@ -314,80 +312,50 @@
     e.preventDefault();
   }
 
-  // ── Raw mode helpers ───────────────────────────────────────────
-  function escHtml(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-
-  function buildRawHtml(): string {
-    const parts: string[] = [];
+  // ── Raw mode: collect edited text from DOM then sync back to visual ─
+  function getRawFinalText(): string {
+    if (!mergedViewRef) return buildFinalText();
+    const editables = Array.from(
+      mergedViewRef.querySelectorAll<HTMLElement>(".mv-text[contenteditable], .mv-resolved-text[contenteditable]")
+    );
+    let ei = 0;
+    const out: string[] = [];
     for (const item of mergedDisplay) {
       if (item.kind === "normal") {
-        parts.push(`<div class="rl rl-ctx" data-orig="${escHtml(item.text)}">${escHtml(item.text) || "​"}</div>`);
+        const t = editables[ei++]?.textContent ?? item.text;
+        out.push(t === "​" ? "" : t);
       } else if (item.kind === "resolved") {
         for (const line of item.lines) {
-          parts.push(`<div class="rl rl-resolved" data-orig="${escHtml(line)}">${escHtml(line) || "​"}</div>`);
+          const t = editables[ei++]?.textContent ?? line;
+          out.push(t === "​" ? "" : t);
         }
-      } else {
-        // Unresolved conflict — show markers + ours/theirs lines
-        parts.push(`<div class="rl rl-cflct" data-orig="&lt;&lt;&lt;&lt;&lt;&lt;&lt;">&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</div>`);
-        for (const l of item.oursLines)   parts.push(`<div class="rl rl-ours"  data-orig="${escHtml(l)}">${escHtml(l) || "​"}</div>`);
-        parts.push(`<div class="rl rl-cflct" data-orig="=======">=======</div>`);
-        for (const l of item.theirsLines) parts.push(`<div class="rl rl-theirs" data-orig="${escHtml(l)}">${escHtml(l) || "​"}</div>`);
-        parts.push(`<div class="rl rl-cflct" data-orig="&gt;&gt;&gt;&gt;&gt;&gt;&gt;">&gt;&gt;&gt;&gt;&gt;&gt;&gt; CHERRY_PICK_HEAD</div>`);
       }
+      // conflict items: skip — they stay as unresolved in the final text
     }
-    return parts.join("");
+    return out.join("\n");
   }
 
-  function onRawInput() {
-    if (!rawContainer) return;
-    rawHasConflict = rawContainer.innerText.includes("<<<<<<<");
+  function onRawLineInput(e: Event) {
+    (e.currentTarget as HTMLElement).dataset.edited = "1";
+    rawEdited = true;
     saved = false;
-    // Highlight lines that differ from their original text
-    rawContainer.querySelectorAll<HTMLElement>("div.rl").forEach(div => {
-      const orig = div.dataset.orig ?? null;
-      const cur  = div.textContent ?? "";
-      if (orig === null) {
-        div.classList.add("rl-new");
-        div.classList.remove("rl-modified");
-      } else if (cur !== orig) {
-        div.classList.add("rl-modified");
-        div.classList.remove("rl-new");
-      } else {
-        div.classList.remove("rl-modified", "rl-new");
-      }
-    });
-  }
-
-  function getRawFinalText(): string {
-    if (!rawContainer) return "";
-    const divs = rawContainer.querySelectorAll<HTMLElement>("div.rl");
-    if (divs.length === 0) return rawContainer.innerText;
-    return Array.from(divs).map(d => d.textContent ?? "").join("\n");
   }
 
   // ── Toggle raw mode ────────────────────────────────────────────
   function toggleRaw() {
     if (!showRaw) {
-      // Enter raw: build colored editable view from current mergedDisplay
-      rawHasConflict = provisionalChoices.size < totalConflicts;
+      rawEdited = false;
       showRaw = true;
-      saved = false;
-      tick().then(() => {
-        if (rawContainer) rawContainer.innerHTML = buildRawHtml();
-      });
     } else {
-      // Exit raw: sync edits back → re-parse mergedText so visual reflects raw changes
-      if (rawContainer) {
+      // Only sync back if user actually typed something in raw mode
+      if (rawEdited) {
         const edited = getRawFinalText();
         const parsed = parse(edited);
         mergedText = edited;
         parts = parsed.parts;
-        provisionalChoices = new Map(); // resolved content is now baked into mergedText
+        provisionalChoices = new Map();
       }
       showRaw = false;
-      saved = false;
     }
   }
 
@@ -417,6 +385,7 @@
       await rpc.git.writeAndStageFile(repo, file, finalText);
       await emit("conflict-file-resolved", { file });
       saved = true;
+      rawEdited = false;
     } catch (e) { error = String(e); }
     finally { applying = false; }
   }
@@ -528,9 +497,7 @@
     <div class="tb-sep"></div>
 
     {#if hasUnresolved}
-      {@const pendingCount = showRaw
-        ? (rawContainer?.innerText ?? "").split("\n").filter(l => l.startsWith("<<<<<<<")).length
-        : totalConflicts - provisionalChoices.size}
+      {@const pendingCount = totalConflicts - provisionalChoices.size}
       <span class="badge-warn">⚠ {pendingCount} chưa giải quyết</span>
     {:else if saved}
       <span class="badge-saved">✓ Đã lưu</span>
@@ -643,43 +610,45 @@
         </button>
       </div>
 
-      {#if showRaw}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="merged-raw"
-          role="textbox"
-          contenteditable="true"
-          spellcheck="false"
-          bind:this={rawContainer}
-          oninput={onRawInput}
-        ></div>
-      {:else}
-        <div class="merged-view">
+      <div class="merged-view" bind:this={mergedViewRef}>
           {#each mergedDisplay as item}
             {#if item.kind === "normal"}
               <div class="mv-line">
                 <span class="mv-gutter"></span>
-                <span class="mv-text">{item.text || "​"}</span>
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  class="mv-text"
+                  contenteditable={showRaw ? "true" : undefined}
+                  spellcheck="false"
+                  oninput={showRaw ? onRawLineInput : undefined}
+                >{item.text || "​"}</span>
               </div>
             {:else if item.kind === "resolved"}
-              <!-- Provisionally resolved — orange lines, change buttons always visible -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="mv-resolved"
                 class:mv-resolved-active={item.ci === currentConflict}
-                onmousedown={() => { currentConflict = item.ci; scrollToConflict(item.ci); }}
+                onmousedown={showRaw ? undefined : () => { currentConflict = item.ci; scrollToConflict(item.ci); }}
               >
-                <div class="mv-resolved-hdr">
-                  <span class="mv-resolved-icon">✓</span>
-                  <span class="mv-resolved-label">Conflict {item.ci + 1} / {totalConflicts}</span>
-                  <button class="mv-act mv-chg-theirs" onclick={(e) => { e.stopPropagation(); blockUseTheirs(item.ci); }}>← Theirs</button>
-                  <button class="mv-act mv-chg-ours"   onclick={(e) => { e.stopPropagation(); blockUseOurs(item.ci); }}>Ours →</button>
-                  <button class="mv-act mv-chg-both"   onclick={(e) => { e.stopPropagation(); blockUseBoth(item.ci); }}>T+O</button>
-                </div>
+                {#if !showRaw}
+                  <div class="mv-resolved-hdr">
+                    <span class="mv-resolved-icon">✓</span>
+                    <span class="mv-resolved-label">Conflict {item.ci + 1} / {totalConflicts}</span>
+                    <button class="mv-act mv-chg-theirs" onclick={(e) => { e.stopPropagation(); blockUseTheirs(item.ci); }}>← Theirs</button>
+                    <button class="mv-act mv-chg-ours"   onclick={(e) => { e.stopPropagation(); blockUseOurs(item.ci); }}>Ours →</button>
+                    <button class="mv-act mv-chg-both"   onclick={(e) => { e.stopPropagation(); blockUseBoth(item.ci); }}>T+O</button>
+                  </div>
+                {/if}
                 {#each item.lines as line}
                   <div class="mv-resolved-line">
                     <span class="mv-resolved-gutter"></span>
-                    <span class="mv-resolved-text">{line || "​"}</span>
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <span
+                      class="mv-resolved-text"
+                      contenteditable={showRaw ? "true" : undefined}
+                      spellcheck="false"
+                      oninput={showRaw ? onRawLineInput : undefined}
+                    >{line || "​"}</span>
                   </div>
                 {/each}
               </div>
@@ -709,7 +678,6 @@
             {/if}
           {/each}
         </div>
-      {/if}
     </div>
   {/if}
 </div>
@@ -952,33 +920,6 @@
   }
   .raw-toggle:hover { color: #aaa; border-color: #555; }
 
-  /* ── Raw edit pane ────────────────────────────────────────── */
-  .merged-raw {
-    flex: 1; min-height: 0;
-    overflow-y: auto; overflow-x: auto;
-    outline: none;
-    background: #0f0f0f;
-    font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-    font-size: 12px; line-height: 19px;
-  }
-  .merged-raw :global(.rl) {
-    min-height: 19px;
-    padding: 0 8px;
-    white-space: pre;
-    tab-size: 4;
-    border-left: 2px solid transparent;
-  }
-  .merged-raw :global(.rl:focus) { outline: none; }
-  /* Same colors as visual merged view */
-  .merged-raw :global(.rl-ctx)     { color: #c0c0c0; border-left-color: transparent; }
-  .merged-raw :global(.rl-resolved){ background: rgba(255,160,0,0.12); color: #ffb74d; border-left-color: rgba(255,160,0,0.5); }
-  .merged-raw :global(.rl-ours)    { background: rgba(58,138,58,0.18); color: #81c784; border-left-color: rgba(58,138,58,0.6); }
-  .merged-raw :global(.rl-theirs)  { background: rgba(58,98,200,0.18); color: #64b5f6; border-left-color: rgba(58,98,200,0.6); }
-  .merged-raw :global(.rl-cflct)   { background: rgba(200,50,50,0.18); color: #ef9a9a; border-left-color: rgba(200,50,50,0.6); }
-  /* User-edited lines */
-  .merged-raw :global(.rl-modified){ background: rgba(255,220,0,0.15) !important; color: #fff176 !important; border-left-color: #ffd600 !important; }
-  .merged-raw :global(.rl-new)     { background: rgba(130,255,130,0.10) !important; color: #a5d6a7 !important; border-left-color: #66bb6a !important; }
-
   /* ── Merged visual view ───────────────────────────────────── */
   .merged-view {
     flex: 1; min-height: 0;
@@ -998,6 +939,8 @@
     flex-shrink: 0;
   }
   .mv-text { flex: 1; padding: 0 8px; white-space: pre; tab-size: 4; color: #c0c0c0; }
+  .mv-text[contenteditable] { outline: none; cursor: text; }
+  .mv-text[data-edited]     { background: rgba(255,220,0,0.15); color: #fff176; }
 
   /* ── Provisionally resolved conflict block (orange) ───────── */
   .mv-resolved {
@@ -1039,6 +982,8 @@
     white-space: pre; tab-size: 4;
     color: #d4a050; line-height: 19px;
   }
+  .mv-resolved-text[contenteditable] { outline: none; cursor: text; }
+  .mv-resolved-text[data-edited]     { background: rgba(255,220,0,0.20); color: #fff176; }
 
   /* Change buttons in resolved block */
   .mv-act {

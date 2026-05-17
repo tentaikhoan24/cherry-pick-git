@@ -67,7 +67,8 @@ sidecar/
         ├── commitdetail.go  # git log -1 full metadata (subject + body)
         ├── commitfiles.go   # git diff-tree --root -M --numstat --name-status
         ├── dryrun.go        # git apply --3way --check (conflict prediction, no working tree change)
-        ├── filediff.go      # git diff-tree --unified=99999 (full file unified diff)
+        ├── filediff.go      # git show --unified=99999 (full file diff for a commit)
+        ├── stageddiff.go    # git diff --cached --unified=99999 (staged file diff, M5d)
         ├── conflict.go      # ConflictFiles (git status --porcelain), ResolveConflict, ContinueCherry
         ├── workingfile.go   # FileContent (os.ReadFile), WriteAndStageFile (os.WriteFile + git add)
         └── git_test.go      # Integration tests against real temp git repos
@@ -93,6 +94,7 @@ sidecar/
 | `git.commitFiles` | Files changed in a commit with status and line counts |
 | `git.dryRunPick` | Predict conflicts via `git apply --3way --check` without touching working tree |
 | `git.fileDiff` | Full unified diff for a single file in a commit |
+| `git.stagedFileDiff` | Unified diff for a staged file (`git diff --cached`) — used by ConflictResolver to preview staged content |
 | `git.conflictFiles` | List files currently in conflict state (all types: UU/AA/DD/AU/UA/DU/UD) |
 | `git.resolveConflict` | Resolve a conflict file by checking out ours/theirs and staging |
 | `git.continueCherry` | `git cherry-pick --continue --no-edit` after all conflicts resolved |

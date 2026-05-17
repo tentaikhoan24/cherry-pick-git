@@ -1,8 +1,8 @@
-# cherry-pick-git
+# Lazy Cherry Pick
 
 A desktop Git client focused on **batch cherry-pick workflows**: multi-select commits across branches, predict and preview conflicts, apply with smart filters.
 
-> Status: **M5 partially complete** — commit detail panels, dry-run conflict preview, file diff viewer, conflict resolver UI (in progress). M4 features (progress bar, cancel, recent repos, Fetch/Pull) are all done.
+> Status: **M5 mostly complete** — commit detail panels, dry-run conflict preview, 2-panel side-by-side diff viewer (TortoiseGit-style with EOL markers + trailing-newline transform), conflict resolver UI with staged-diff preview for resolved files. All M4 features (progress bar, cancel, recent repos, Fetch/Pull) done.
 
 ## Why
 

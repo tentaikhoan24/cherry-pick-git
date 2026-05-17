@@ -332,10 +332,23 @@ Params: `{ repo: string; sha: string; file: string }`
 
 Result:
 ```ts
-{ diff: string }
+{ sha: string; file: string; diff: string }
 ```
 
-Returns the full unified diff for a single file in a commit (`git diff-tree --unified=99999`). The large context value means the entire file is shown, not just changed hunks.
+Returns the full unified diff for a single file in a commit (`git show --unified=99999 --format= <sha> -- <file>`). Falls back to `git diff <empty-tree> <sha>` for initial commits with no parent. The large context value means the entire file is shown, not just changed hunks.
+
+---
+
+### `git.stagedFileDiff` (M5d)
+
+Params: `{ repo: string; file: string }`
+
+Result:
+```ts
+{ sha: string; file: string; diff: string }  // sha is always "" for staged diffs
+```
+
+Returns the unified diff for a single staged file (`git diff --cached --unified=99999 -- <file>`). Used to review the resolved content after staging a conflict resolution.
 
 ---
 

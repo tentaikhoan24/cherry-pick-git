@@ -13,9 +13,10 @@
     oncontinue: () => void;
     onabort: () => void;
     onviewfile?: (file: string) => void;
+    onviewdiff?: (file: string) => void;
   }
 
-  let { files, conflictSha, queue, dryRunMap, remainingCommitFiles, busy, resolvedSet, onresolve, oncontinue, onabort, onviewfile }: Props = $props();
+  let { files, conflictSha, queue, dryRunMap, remainingCommitFiles, busy, resolvedSet, onresolve, oncontinue, onabort, onviewfile, onviewdiff }: Props = $props();
 
   const resolvedCount = $derived([...resolvedSet].filter(p => files.some(f => f.path === p)).length);
   const allResolved = $derived(files.length > 0 && resolvedCount === files.length);
@@ -66,7 +67,13 @@
         <div class="file-row" class:resolved>
           <span class="file-tree-line"></span>
           <span class="status-label" class:resolved-label={resolved}>{statusLabel[f.status] ?? f.status}</span>
-          {#if onviewfile}
+          {#if resolved}
+            {#if onviewdiff}
+              <button class="file-path-btn file-path-btn-resolved" title="View staged diff: {f.path}" onclick={() => onviewdiff!(f.path)}>{f.path}</button>
+            {:else}
+              <span class="file-path">{f.path}</span>
+            {/if}
+          {:else if onviewfile}
             <button class="file-path-btn" title="Open merge editor: {f.path}" onclick={() => onviewfile!(f.path)}>{f.path}</button>
           {:else}
             <span class="file-path">{f.path}</span>
@@ -289,6 +296,8 @@
     text-underline-offset: 2px;
   }
   .file-path-btn:hover { color: #7aaeff; }
+  .file-path-btn-resolved { color: #888; }
+  .file-path-btn-resolved:hover { color: #aaa; }
 
   .resolved-badge {
     flex-shrink: 0;

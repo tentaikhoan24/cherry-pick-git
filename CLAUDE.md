@@ -1,17 +1,17 @@
 # CLAUDE.md
 
-Context for AI-assisted development on `cherry-pick-git`. Read this first when entering the repo.
+Context for AI-assisted development on `lazy-cherry-pick`. Read this first when entering the repo.
 
 ## In one paragraph
 
-A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M5 is partially complete: commit detail panels, dry-run conflict preview, file diff viewer, conflict resolver UI (3-way merge editor), Create Branch button, and all M4 features (progress bar, Cancel, Fetch/Pull, recent repos).
+A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M5 mostly done: commit detail panels, dry-run conflict preview, 2-panel side-by-side diff viewer (TortoiseGit-style with EOL markers + trailing-newline transform), conflict resolver UI (3-way merge editor), staged diff for resolved files, Create Branch button, and all M4 features (progress bar, Cancel, Fetch/Pull, recent repos).
 
 ## File map
 
 | Path | Role |
 |---|---|
 | `app/src/routes/+page.svelte` | Main orchestrator — 3-pane UI, all app state |
-| `app/src/routes/diff/+page.svelte` | File diff viewer window (unified diff, nav buttons, syntax highlight) |
+| `app/src/routes/diff/+page.svelte` | File diff viewer window (`?staged=true` switches to staged diff via `git.stagedFileDiff`) |
 | `app/src/routes/conflict/+page.svelte` | 3-pane conflict merge editor (Theirs / Ours / merged result) |
 | `app/src/lib/Toolbar.svelte` | Repo path display + Open repo (file dialog) |
 | `app/src/lib/CommitList.svelte` | Source branch dropdown + scrollable commit list with checkboxes |
@@ -19,8 +19,8 @@ A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a
 | `app/src/lib/ResultBanner.svelte` | Result display: ✅ applied / ⚠️ conflict / 🔴 error |
 | `app/src/lib/CommitDetail.svelte` | Commit subject, body, SHA, author, date, parents panel |
 | `app/src/lib/CommitFiles.svelte` | File list for a commit with status badge (+/- stats), click to open diff |
-| `app/src/lib/FileDiff.svelte` | Unified diff renderer with line numbers and change block navigation |
-| `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort |
+| `app/src/lib/FileDiff.svelte` | 2-panel side-by-side diff renderer (TortoiseGit-style): sync scroll, EOL marker toggle (¶), trailing-newline transform |
+| `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort; resolved files open staged diff |
 | `app/src/lib/rpc.ts` | Typed wrapper around `invoke('sidecar_call', ...)` + direct Tauri commands |
 | `app/src/lib/rpc-types.ts` | TypeScript types mirroring Go sidecar types |
 | `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (multi-line reader + cp-progress events), `sidecar_cancel`, `recents_load/save` |
@@ -30,8 +30,8 @@ A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a
 | `app/src-tauri/binaries/sidecar-<triple>.exe` | Built sidecar binary — Tauri requires the target triple suffix |
 | `sidecar/main.go` | NDJSON JSON-RPC dispatcher; `wrap1` generic helper; `toRPCError` bridge; `git.cherryPick` uses manual handler to inject progress callback |
 | `sidecar/internal/rpc/server.go` | NDJSON JSON-RPC 2.0 transport; BOM stripping; dispatch loop; `ProgressWriter` + `WriteProgress` |
-| `sidecar/internal/git/` | Git operations layer (19 files) — see sidecar/README.md |
-| `sidecar/go.mod` | Module `github.com/cherry-pick-git/sidecar`; Go 1.23 |
+| `sidecar/internal/git/` | Git operations layer (20 files) — see sidecar/README.md |
+| `sidecar/go.mod` | Module `github.com/lazy-cherry-pick/sidecar`; Go 1.23 |
 | `docs/IPC.md` | Full protocol spec — method signatures, types, error codes |
 
 ## Commands
@@ -97,7 +97,7 @@ cargo build
 - **Concurrent sidecar calls are safe.** `ActiveSidecar` is `Mutex<HashMap<u64, CommandChild>>` with a per-call atomic `call_id`. Each call stores its child by `call_id` and removes only its own entry on finish — concurrent calls from multiple windows (e.g. main + conflict editor) cannot kill each other's processes. `sidecar_cancel` drains the entire map.
 - **Progress protocol:** intermediate lines carry `"progress"` field (not `"result"/"error"`) with the same `id`. Rust detects by `parsed.get("progress").is_some()`. Frontend listens via `@tauri-apps/api/event` `listen("cp-progress", ...)`.
 - **Cancel:** `sidecar_cancel` Tauri command drains `ActiveSidecar` (`Mutex<HashMap<u64, CommandChild>>`), killing all active children. Frontend then calls `git.abort` via a new sidecar spawn to run `git cherry-pick --abort`.
-- **Recent repos:** stored in `%APPDATA%/cherry-pick-git/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
+- **Recent repos:** stored in `%APPDATA%/lazy-cherry-pick/recents.json` by Rust commands `recents_load`/`recents_save`. Max 10 entries. Not routed through the Go sidecar.
 - **Sidecar logs to stderr, responses to stdout.** Don't write logs to stdout.
 - **Capabilities are scoped to `binaries/sidecar`.** Don't broaden to `shell:default`.
 - **Write operations require explicit user action.** `git.cherryPick` is only triggered by the Apply button — never called automatically. Read methods (`git.status`, `git.commits`, `git.fetch`) are fine to call on load/branch-change.
@@ -115,15 +115,15 @@ cargo build
 **M4 done**:
 - **Progress streaming**: `git.cherryPick` emits progress lines (`{"progress": {"n":1,"total":3,"sha":"..."}}`) before final result. Rust reads in loop + emits Tauri event `cp-progress`. `PickQueue` shows progress bar `n/total — sha`.
 - **Cancel**: `sidecar_cancel` Tauri command kills current sidecar child. Frontend calls `git.abort` to cleanup git state. Cancel button visible during apply.
-- **Recent repos (M4b)**: Rust `recents_load`/`recents_save` commands write `%APPDATA%/cherry-pick-git/recents.json`. Toolbar shows "Recent ▾" dropdown (max 10 entries).
+- **Recent repos (M4b)**: Rust `recents_load`/`recents_save` commands write `%APPDATA%/lazy-cherry-pick/recents.json`. Toolbar shows "Recent ▾" dropdown (max 10 entries).
 - **Fetch / Pull refresh**: `git.fetch` (`git fetch --prune`) and `git.pull` (`git fetch <remote> <branch>:<branch>`, fast-forward only). CommitList header has Fetch/Pull dropdown button.
 
-**M5 partially done**:
+**M5 mostly done**:
 - **M5a — Commit detail panels**: click commit → resizable panel below shows CommitDetail (subject, body, SHA, author, date, parents) + CommitFiles (file list with status badge, +/- stats, click to open diff window). Horizontal resize handle between CommitList and PickQueue panes.
 - **M5b — Dry-run conflict preview**: `git.dryRunPick` RPC uses `git apply --3way --check`; ⚠ icon on queue items with predicted conflicts; debounce 400 ms.
-- **File diff viewer**: `git.fileDiff` RPC (`--unified=99999`); opens in a new Tauri window (`diff-${Date.now()}`); nav buttons ▲/▼ to jump between change blocks.
+- **File diff viewer**: `git.fileDiff` RPC (`git show --unified=99999`); opens in a new Tauri window (`diff-${Date.now()}`); nav buttons ▲/▼ to jump between change blocks. Now **2-panel side-by-side (M5d)** — see below.
 - **Create Branch**: `git.createBranch` RPC; Create Branch button in PickQueue target dropdown.
-- **M5c — Conflict resolver (in progress)**: `git.conflictFiles`, `git.resolveConflict`, `git.continueCherry`, `git.fileContent`, `git.writeAndStageFile` RPCs; `ConflictResolver.svelte` with Keep Ours/Use Theirs/Continue/Abort; `/conflict` route — TortoiseGit-style 3-pane merge editor:
+- **M5c — Conflict resolver (done)**: `git.conflictFiles`, `git.resolveConflict`, `git.continueCherry`, `git.fileContent`, `git.writeAndStageFile` RPCs; `ConflictResolver.svelte` with Keep Ours/Use Theirs/Continue/Abort; `/conflict` route — TortoiseGit-style 3-pane merge editor:
   - **Line numbers** in each top pane (independent theirs/ours counters)
   - **Inline conflict-header bar** per block: "Conflict N/M · ← Theirs · T+O" (left) / "Ours → · O+T" (right) — action buttons right at the conflict, no need to use toolbar
   - **Independent drag-select per pane**: `leftSel` + `rightSel` state — selecting on one pane does NOT clear the other; right-click shows cross-pane combine options when both have selections
@@ -132,8 +132,17 @@ cargo build
   - **Keyboard**: ↑↓ to navigate conflicts
   - **Provisional resolution model**: clicking Theirs/Ours/T+O sets a *soft choice* in `provisionalChoices: Map<number, string[]>` — `mergedText` keeps conflict markers intact. Bottom pane shows chosen lines in **orange** immediately, but user can click any button again to change. `buildFinalText()` applies all choices only at save time.
   - **Bottom pane (TortoiseGit style)**: provisionally-resolved blocks shown in orange with change buttons (← Theirs / Ours → / T+O) always visible; unresolved blocks shown as **hatched red placeholder** with Ours/Theirs/T+O buttons; click block → jumps top panes to that conflict
-  - **Toggle "✎ Raw"**: applies provisional choices to `mergedText` first, then opens textarea for direct edit
-  - Flow: cherry-pick stops in conflict state → ConflictResolver shown → click file → conflict window opens → resolve each block (changeable) → Lưu & Stage → Continue. End-to-end testing still needed.
+  - **Toggle "✎ Raw"**: enables inline contenteditable on `.mv-text` spans (visual mode + direct edit). Yellow highlight on edited lines. Exit syncs DOM back only if `rawEdited` was set (avoids overwriting state when user just looked at raw mode).
+  - **Save status**: button "Lưu & Stage" disabled when `hasUnresolved || applying || saved`; after save shows "✓ Đã lưu" badge instead of auto-closing window.
+  - Flow: cherry-pick stops in conflict state → ConflictResolver shown → click file → conflict window opens → resolve each block (changeable) → Lưu & Stage → click Continue → `continueCherry` applies the staged commit + remaining queue commits via `applyPickShas()`.
+
+- **M5d — Polish & diff viewer redesign (done)**:
+  - **Project rename**: `cherry-pick-git` → `Lazy Cherry Pick`. Tauri productName/identifier updated; AppData path is now `lazy-cherry-pick/recents.json`; Go module is `github.com/lazy-cherry-pick/sidecar`.
+  - **Staged diff for resolved files**: `git.stagedFileDiff` RPC (`git diff --cached --unified=99999 -- <file>`); ConflictResolver opens this in a diff window (gray button) when a file is already resolved, instead of the merge editor.
+  - **2-panel side-by-side diff viewer (TortoiseGit-style)**: complete rewrite of `FileDiff.svelte`. Layout: left/right panels with independent labels (`Before`/`{sha}` for commit diff, `HEAD`/`Staged` for staged diff), synced scroll, hatched filler rows when one side has no matching line, hunk header spans both panels.
+  - **EOL markers (Notepad++ style)**: toggle `¶` button shows `LF` (blue) / `CRLF` (orange) at end of each line. Parser auto-detects trailing `\r` and handles `\ No newline at end of file` as `eol="none"` (no marker rendered).
+  - **Trailing-newline transform (Option D + lookahead)**: when a paired `change` row has `leftText === rightText` but EOL differs ("none" vs "lf"/"crlf"), convert to `ctx` row + phantom empty `change` row (representing the implicit empty line that appears/disappears with the trailing newline). Lookahead skips the phantom if the next row is already an empty del/add — prevents double-counting when the diff covers both an empty line AND the trailing newline. Matches TortoiseGit's "editor view" rather than git's "lost trailing newline" view. See `design-side-by-side-diff` memory.
+  - **Raw-mode save fix in conflict editor**: setting `rawEdited = false` after successful save prevents the "blank screen" bug when toggling back to visual mode.
 
 **Not done**: smart filter UI, settings, packaging, signing.
 
@@ -152,9 +161,10 @@ See README roadmap for M5+ scope.
 ## Cross-session memory
 
 When working with the user on this repo, prior decisions are stored as Claude memories:
-- `project-cherry-pick-git` — overall architecture (hybrid Tauri+Go) and why
-- `design-target-model` — target branch is Model B with default = current
 - `user-language-vi` — communicate in Vietnamese, prefer short option-style questions
+- `project-m4-complete`, `project-m5-complete`, `project-m5c-wip`, `project-m5d-complete` — feature checklists per milestone
+- `design-conflict-merge-logic` — conflict merge editor (provisional model, parser, render pipeline)
+- `design-side-by-side-diff` — 2-panel diff viewer logic incl. trailing-newline transform with lookahead
 
 These memories complement (not replace) this file. This file describes the **codebase**; memories describe the **user and decisions**.
 

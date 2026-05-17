@@ -122,12 +122,17 @@
           onclick={() => onselect(c)}
           onkeydown={(e) => e.key === "Enter" && onselect(c)}
         >
-          <input
-            type="checkbox"
-            checked={selected.has(c.sha)}
-            onclick={(e) => e.stopPropagation()}
-            onchange={() => ontoggle(c.sha)}
-          />
+          <label
+            class="cb-wrap"
+            onclick={(e) => { e.stopPropagation(); }}
+            title={selected.has(c.sha) ? "Bỏ khỏi queue" : "Thêm vào queue"}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(c.sha)}
+              onchange={() => ontoggle(c.sha)}
+            />
+          </label>
           <div class="commit-info">
             <span class="subject" title={c.subject}>{c.subject}</span>
             <span class="meta">
@@ -250,7 +255,7 @@
   }
   .commit-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.6rem;
     padding: 0.5rem 0.75rem;
     cursor: pointer;
@@ -260,7 +265,18 @@
   .commit-row:hover { background: var(--hover, #2e2e2e); }
   .commit-row.checked { background: var(--selected, #1a2a4a); }
   .commit-row.active { outline: 1px solid var(--accent, #4a7ef5); outline-offset: -1px; }
-  .commit-row input[type="checkbox"] { flex-shrink: 0; margin-top: 3px; cursor: pointer; }
+  .cb-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 6px 10px 6px 2px;
+    margin: -6px -10px -6px -2px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .cb-wrap:hover { background: rgba(255,255,255,0.06); }
+  .cb-wrap input[type="checkbox"] { cursor: pointer; pointer-events: none; }
   .commit-info {
     display: flex;
     flex-direction: column;

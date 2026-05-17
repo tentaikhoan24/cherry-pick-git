@@ -9,6 +9,8 @@
   let fileInfo = $state<CommitFile | null>(null);
   let loading = $state(true);
   let error = $state("");
+  let leftLabel = $state("Before");
+  let rightLabel = $state("After");
 
   onMount(async () => {
     const p = new URLSearchParams(window.location.search);
@@ -21,13 +23,19 @@
 
     fileInfo = { path: filePath, status, added, removed };
 
-    if (!repo || !sha || !filePath) {
+    const staged = p.get("staged") === "true";
+    leftLabel = staged ? "HEAD" : "Before";
+    rightLabel = staged ? "Staged" : (sha.slice(0, 8) || "Commit");
+
+    if (!repo || !filePath || (!staged && !sha)) {
       error = "Missing parameters";
       loading = false;
       return;
     }
     try {
-      diffResult = await rpc.git.fileDiff(repo, sha, filePath);
+      diffResult = staged
+        ? await rpc.git.stagedFileDiff(repo, filePath)
+        : await rpc.git.fileDiff(repo, sha, filePath);
     } catch (e) {
       error = e instanceof RpcCallError ? e.rpcError.message : String(e);
     } finally {
@@ -44,6 +52,8 @@
       diff={diffResult?.diff ?? ""}
       file={fileInfo}
       {loading}
+      {leftLabel}
+      {rightLabel}
       onback={() => getCurrentWindow().close()}
     />
   {/if}

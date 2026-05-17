@@ -23,8 +23,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/cherry-pick-git/sidecar/internal/git"
-	"github.com/cherry-pick-git/sidecar/internal/rpc"
+	"github.com/lazy-cherry-pick/sidecar/internal/git"
+	"github.com/lazy-cherry-pick/sidecar/internal/rpc"
 )
 
 const sidecarVersion = "0.2.0"
@@ -277,6 +277,17 @@ func registerHandlers(s *rpc.Server) {
 			return nil, err
 		}
 		return r.WriteAndStageFile(ctx, p.WriteAndStageArgs)
+	}))
+
+	s.Register("git.stagedFileDiff", wrap1(func(ctx context.Context, p struct {
+		Repo string `json:"repo"`
+		git.StagedFileDiffArgs
+	}) (any, error) {
+		r, err := git.Open(ctx, p.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return r.StagedFileDiff(ctx, p.StagedFileDiffArgs)
 	}))
 
 	s.Register("git.continueCherry", wrap1(func(ctx context.Context, p struct {

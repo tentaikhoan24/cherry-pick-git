@@ -1,5 +1,5 @@
-# dev.ps1 — start the cherry-pick-git Tauri dev server
-# Usage: from any PowerShell window, run:   d:\project\cherry-pick-git\dev.ps1
+# dev.ps1 — start the Lazy Cherry Pick Tauri dev server
+# Usage: from any PowerShell window, run:   d:\project\lazy-cherry-pick\dev.ps1
 #   or, from inside the project root:        .\dev.ps1
 
 $env:Path = "$env:USERPROFILE\.cargo\bin;C:\Program Files\Go\bin;" + $env:Path

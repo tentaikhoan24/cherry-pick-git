@@ -1,3 +1,3 @@
-module github.com/cherry-pick-git/sidecar
+module github.com/lazy-cherry-pick/sidecar
 
 go 1.23

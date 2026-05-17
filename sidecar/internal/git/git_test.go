@@ -246,9 +246,18 @@ func TestCherryPick_Conflict(t *testing.T) {
 		t.Errorf("conflicts = %+v", r.Conflicts)
 	}
 
-	// After abort, repo should be clean again
+	// Repo should be left in conflict state (M5 leave-in-conflict behavior)
 	st, _ := repo.Status(ctx)
-	if st.Dirty {
-		t.Errorf("repo should be clean after conflict abort, got: %+v", st)
+	if !st.Dirty {
+		t.Errorf("repo should be in conflict state after cherry-pick conflict, got: %+v", st)
+	}
+
+	// After explicit abort, repo should be clean again
+	if err := repo.Abort(ctx); err != nil {
+		t.Fatalf("abort failed: %v", err)
+	}
+	st2, _ := repo.Status(ctx)
+	if st2.Dirty {
+		t.Errorf("repo should be clean after abort, got: %+v", st2)
 	}
 }

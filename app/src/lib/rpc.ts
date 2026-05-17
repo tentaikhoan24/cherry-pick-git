@@ -104,6 +104,8 @@ export const rpc = {
 
     fileDiff: (repo: string, sha: string, file: string) =>
       call<FileDiffResult>("git.fileDiff", { repo, sha, file }),
+    stagedFileDiff: (repo: string, file: string) =>
+      call<FileDiffResult>("git.stagedFileDiff", { repo, file }),
 
     conflictFiles: (repo: string) =>
       call<ConflictFilesResult>("git.conflictFiles", { repo }),

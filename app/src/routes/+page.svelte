@@ -174,6 +174,17 @@
     });
   }
 
+  function viewConflictFileDiff(file: string) {
+    if (!repoPath) return;
+    const params = new URLSearchParams({ repo: repoPath, file, staged: "true", status: "M" });
+    new WebviewWindow(`diff-${Date.now()}`, {
+      url: `${window.location.origin}/diff?${params}`,
+      title: `Staged diff: ${file}`,
+      width: 900,
+      height: 650,
+    });
+  }
+
   async function abortConflict() {
     conflictBusy = true;
     try { await rpc.git.abort(repoPath); } catch { /* ignore */ }
@@ -549,6 +560,7 @@
         oncontinue={continueCherry}
         onabort={abortConflict}
         onviewfile={viewConflictFile}
+        onviewdiff={viewConflictFileDiff}
       />
     {/if}
 
