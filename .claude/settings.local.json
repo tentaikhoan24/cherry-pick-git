@@ -12,7 +12,11 @@
       "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;\" + $env:Path; rustup --version; rustup show; rustc --version; cargo --version)",
       "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;\" + $env:Path; rustup default stable; rustc --version; cargo --version)",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git tag *)"
     ]
   }
 }

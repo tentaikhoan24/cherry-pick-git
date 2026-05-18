@@ -5,7 +5,7 @@
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
   import { check, type Update } from "@tauri-apps/plugin-updater";
-  import { restart } from "@tauri-apps/plugin-process";
+  import { relaunch } from "@tauri-apps/plugin-process";
   import Toolbar from "$lib/Toolbar.svelte";
   import CommitList from "$lib/CommitList.svelte";
   import PickQueue from "$lib/PickQueue.svelte";
@@ -58,12 +58,17 @@
     if (!pendingUpdate) return;
     updateDownloading = true;
     updateProgress = 0;
+    let totalBytes = 0;
+    let downloadedBytes = 0;
     await pendingUpdate.downloadAndInstall((event) => {
-      if (event.event === "Progress" && event.data.contentLength) {
-        updateProgress = (event.data.chunkLength / event.data.contentLength) * 100;
+      if (event.event === "Started") {
+        totalBytes = event.data.contentLength ?? 0;
+      } else if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        if (totalBytes > 0) updateProgress = (downloadedBytes / totalBytes) * 100;
       }
     });
-    await restart();
+    await relaunch();
   }
 
   async function checkForUpdates() {
