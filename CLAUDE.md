@@ -4,7 +4,7 @@ Context for AI-assisted development on `lazy-cherry-pick`. Read this first when 
 
 ## In one paragraph
 
-A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M8 done: external diff/merge tool support — users can configure TortoiseGit, Beyond Compare, WinMerge, VSCode (or any exe) as diff viewer / merge tool; Go sidecar extracts file versions to temp dirs; Rust `launch_detached`/`launch_and_wait` commands launch external processes; Settings modal has path input + args template + Browse button + Auto-detect. Built-in viewers remain as fallback when external tools are disabled. All UI text in English.
+A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a Go sidecar and talks to it over **newline-delimited JSON-RPC 2.0 on stdin/stdout**. The sidecar shells directly to `git` CLI (no library). Frontend is Svelte 5 + TypeScript via SvelteKit. M9 done: auto-updater — app checks for updates on startup via `@tauri-apps/plugin-updater`, shows `UpdateBanner` with download progress, relaunches after install; Settings has "Check for updates on startup" toggle + "Check Now" button; CI signs artifacts with ed25519 key (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret) and publishes `latest.json` to GitHub releases. M8 done: external diff/merge tool support. All UI text in English.
 
 ## File map
 
@@ -21,12 +21,13 @@ A Tauri 2 desktop app for batch Git cherry-pick workflows. Rust backend spawns a
 | `app/src/lib/CommitFiles.svelte` | File list for a commit with status badge (+/- stats), click to open diff |
 | `app/src/lib/FileDiff.svelte` | 2-panel side-by-side diff renderer (TortoiseGit-style): sync scroll, EOL marker toggle (¶), trailing-newline transform |
 | `app/src/lib/ConflictResolver.svelte` | Conflict file list — Keep Ours / Use Theirs / Continue / Abort; resolved files open staged diff |
-| `app/src/lib/Settings.svelte` | Settings modal — maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme (Dark/Light); External Tools section (diff + merge: toggle, path, args template, Browse button, Auto-detect) |
+| `app/src/lib/Settings.svelte` | Settings modal — maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme (Dark/Light), checkForUpdatesOnStartup; External Tools section; "Check Now" button triggers manual update check |
+| `app/src/lib/UpdateBanner.svelte` | Update notification banner — shows version, download progress bar, "Update Now" / "Later" buttons |
 | `app/src/lib/GitConsole.svelte` | Git Console panel — realtime git command log grouped by RPC call; load history from file; Clear button |
 | `app/src/lib/rpc.ts` | Typed wrapper around `invoke('sidecar_call', ...)` + direct Tauri commands |
 | `app/src/lib/rpc-types.ts` | TypeScript types mirroring Go sidecar types |
 | `app/src-tauri/src/lib.rs` | Rust entry; `sidecar_call` (stderr `[GIT_CMD]`/`[GIT_INFO]` parsing + git-log events + file append), `settings_load/save`, `git_log_read/clear`, `recents_load/save`, `launch_detached`, `launch_and_wait`, `detect_external_tools` |
-| `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tokio` (features: `sync`, `io-util`, `macros`, `process`) |
+| `app/src-tauri/Cargo.toml` | `tauri-plugin-shell`, `tauri-plugin-dialog`, `tauri-plugin-updater`, `tauri-plugin-process`, `tokio` (features: `sync`, `io-util`, `macros`, `process`) |
 | `sidecar/internal/git/externaltool.go` | `ExtractDiffFiles`, `ExtractConflictFiles`, `StageResolvedFile`, `CleanupTmpDir` — extracts file versions to `lcp-diff-*`/`lcp-merge-*` temp dirs for external tools |
 | `app/src-tauri/tauri.conf.json` | `bundle.externalBin: ["binaries/sidecar"]` |
 | `app/src-tauri/capabilities/default.json` | `shell:allow-*` for sidecar + `dialog:allow-open`; window globs: `diff-*`, `conflict-*` |
@@ -179,7 +180,15 @@ cargo build
 - **FileDiff.svelte status-aware empty messages**: status "A" → "File did not exist" (left) / "New empty file" (right); status "D" → "Empty file" / "File was deleted". Fixes "No changes." shown for newly-added empty files.
 - **conflict/+page.svelte async onMount fix**: wrapped async init in IIFE, returned sync cleanup — fixes TypeScript error from Svelte's `onMount` typing.
 
-**Not done**: packaging, signing.
+**M9 done**:
+- **Auto-updater**: `@tauri-apps/plugin-updater` + `@tauri-apps/plugin-process` registered in Rust. `check()` called on startup if `checkForUpdatesOnStartup: true`. `UpdateBanner.svelte` shows version + progress bar. `installUpdate()` has try/catch to reset state on error. `relaunch()` called after install.
+- **Settings**: `checkForUpdatesOnStartup` toggle + "Check Now" button (`onchecknow` prop). `AppSettings` struct in Rust adds `check_for_updates_on_startup: bool` with `default_true()`.
+- **Updater endpoint**: `https://github.com/tentaikhoan24/lazy-cherry-pick/releases/latest/download/latest.json`. Public key in `tauri.conf.json` `plugins.updater.pubkey`.
+- **CI signing**: `TAURI_SIGNING_PRIVATE_KEY` GitHub secret (ed25519 key generated via `cargo tauri signer generate`). `bundle.createUpdaterArtifacts: true` in `tauri.conf.json`. CI generates `latest.json` + `.sig` files automatically on tag push.
+- **Capabilities**: `updater:allow-check`, `updater:allow-download-and-install`, `process:allow-restart` added to `default.json`.
+- **Key pitfalls**: correct function is `relaunch()` not `restart()`; `Progress` event only has `chunkLength`, `contentLength` is in `Started` event; `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` must NOT be set as GitHub secret if key has no password (resolves to empty string automatically).
+
+**Not done**: Windows Authenticode signing (SmartScreen) — requires EV certificate, not planned.
 
 See README roadmap for M5+ scope.
 
