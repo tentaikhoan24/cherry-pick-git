@@ -54,4 +54,3 @@ text.txt
 build/
 releases/
 BUILD_GUIDE.md
-sidecar/internal/git/stageddiff.go
