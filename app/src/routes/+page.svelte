@@ -60,15 +60,20 @@
     updateProgress = 0;
     let totalBytes = 0;
     let downloadedBytes = 0;
-    await pendingUpdate.downloadAndInstall((event) => {
-      if (event.event === "Started") {
-        totalBytes = event.data.contentLength ?? 0;
-      } else if (event.event === "Progress") {
-        downloadedBytes += event.data.chunkLength;
-        if (totalBytes > 0) updateProgress = (downloadedBytes / totalBytes) * 100;
-      }
-    });
-    await relaunch();
+    try {
+      await pendingUpdate.downloadAndInstall((event: any) => {
+        if (event.event === "Started") {
+          totalBytes = event.data.contentLength ?? 0;
+        } else if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          if (totalBytes > 0) updateProgress = (downloadedBytes / totalBytes) * 100;
+        }
+      });
+      await relaunch();
+    } catch {
+      updateDownloading = false;
+      updateProgress = 0;
+    }
   }
 
   async function checkForUpdates() {
