@@ -7,15 +7,19 @@
     settings: AppSettings;
     onclose: () => void;
     onsave: (s: AppSettings) => void;
+    onchecknow?: () => Promise<boolean>;
   }
 
-  let { settings, onclose, onsave }: Props = $props();
+  let { settings, onclose, onsave, onchecknow }: Props = $props();
 
   let maxCommits = $state(settings.maxCommits);
   let defaultApplyMode = $state(settings.defaultApplyMode);
   let showEolMarkers = $state(settings.showEolMarkers);
   let autoFetchOnOpen = $state(settings.autoFetchOnOpen);
+  let checkForUpdatesOnStartup = $state(settings.checkForUpdatesOnStartup);
   let theme = $state(settings.theme);
+  let checkingNow = $state(false);
+  let checkResult = $state<"up-to-date" | "found" | null>(null);
   let externalDiffEnabled = $state(settings.externalDiffEnabled);
   let externalDiffPath = $state(settings.externalDiffPath);
   let externalDiffArgs = $state(settings.externalDiffArgs);
@@ -53,6 +57,7 @@
       maxCommits, defaultApplyMode, showEolMarkers, autoFetchOnOpen, theme,
       externalDiffEnabled, externalDiffPath, externalDiffArgs,
       externalMergeEnabled, externalMergePath, externalMergeArgs,
+      checkForUpdatesOnStartup,
     });
     onclose();
   }
@@ -164,6 +169,39 @@
         <div class="theme-seg">
           <button class="seg-btn" class:active={theme === "dark"} onclick={() => (theme = "dark")}>Dark</button>
           <button class="seg-btn" class:active={theme === "light"} onclick={() => (theme = "light")}>Light</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Check for updates on startup</span>
+        <div class="row-right">
+          <button
+            class="toggle"
+            class:on={checkForUpdatesOnStartup}
+            onclick={() => (checkForUpdatesOnStartup = !checkForUpdatesOnStartup)}
+            aria-checked={checkForUpdatesOnStartup}
+            role="switch"
+          >
+            {checkForUpdatesOnStartup ? "On" : "Off"}
+          </button>
+          <button
+            class="btn-check-now"
+            disabled={checkingNow}
+            onclick={async () => {
+              checkingNow = true;
+              checkResult = null;
+              const found = await onchecknow?.();
+              checkResult = found ? "found" : "up-to-date";
+              checkingNow = false;
+            }}
+          >
+            {checkingNow ? "Checking…" : "Check Now"}
+          </button>
+          {#if checkResult === "up-to-date"}
+            <span class="check-ok">✓ Up to date</span>
+          {:else if checkResult === "found"}
+            <span class="check-found">Update found!</span>
+          {/if}
         </div>
       </div>
 
@@ -561,6 +599,41 @@
   .ref-table code {
     color: #aaa;
   }
+  .row-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-check-now {
+    padding: 3px 10px;
+    background: var(--surface-elevated, #2a2a2a);
+    color: var(--text, #ccc);
+    border: 1px solid var(--border, #444);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .btn-check-now:hover:not(:disabled) {
+    background: var(--hover, #333);
+  }
+
+  .btn-check-now:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .check-ok {
+    font-size: 12px;
+    color: #5a9e5a;
+  }
+
+  .check-found {
+    font-size: 12px;
+    color: #e8a838;
+  }
+
   .ref-note {
     font-family: inherit;
     font-size: 0.64rem;

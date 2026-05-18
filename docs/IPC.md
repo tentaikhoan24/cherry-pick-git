@@ -412,6 +412,52 @@ Writes `content` to the file at `path` in the working tree and stages it (`git a
 
 ---
 
+### `git.extractDiffFiles` (M8)
+
+Params: `{ repo: string; sha: string; file: string }`
+
+Result:
+```ts
+{ leftPath: string; rightPath: string; leftLabel: string; rightLabel: string; tmpDir: string }
+```
+
+Extracts two versions of a file to a temp directory for use by an external diff viewer. `leftPath` is the `sha^` version (before), `rightPath` is the `sha` version (after). If the file was added in this commit, `leftPath` contains an empty file; if deleted, `rightPath` is empty. `leftLabel` is `"<sha>^"`, `rightLabel` is the first 8 chars of sha. Temp dir is named `lcp-diff-*` — **not cleaned up automatically** (OS removes on reboot). Call `git.cleanupTmpDir` explicitly only if needed.
+
+---
+
+### `git.extractConflictFiles` (M8)
+
+Params: `{ repo: string; file: string }`
+
+Result:
+```ts
+{ basePath: string; oursPath: string; theirsPath: string; outputPath: string; tmpDir: string }
+```
+
+Extracts all three conflict stages of a file plus a working-tree copy to a temp directory (`lcp-merge-*`) for use by an external merge tool. Stages: `:1` → `basePath` (common ancestor), `:2` → `oursPath` (HEAD/target branch), `:3` → `theirsPath` (cherry-picked commit). `outputPath` is a copy of the current working-tree file (with conflict markers) — the merge tool should write its result here. Call `git.stageResolvedFile` after the tool closes, then `git.cleanupTmpDir`.
+
+---
+
+### `git.stageResolvedFile` (M8)
+
+Params: `{ repo: string; file: string; contentPath: string }`
+
+Result: `{ staged: true }`
+
+Reads the merge result from `contentPath` (written by the external merge tool), writes it to the working tree at `file`, and stages it with `git add`. Returns an error if the file still contains conflict markers (`<<<<<<<`) — prevents staging an unresolved file when the user closes the merge tool without finishing.
+
+---
+
+### `git.cleanupTmpDir` (M8)
+
+Params: `{ tmpDir: string }`
+
+Result: `{}`
+
+Removes a temp directory created by `git.extractDiffFiles` or `git.extractConflictFiles`. Only directories whose base name starts with `lcp-` can be removed — safety guard against deleting arbitrary paths.
+
+---
+
 ## Concurrency model
 
 **Current**: one process per call. Rust spawns, writes one request line, reads lines until `result`/`error`, kills child. Progress lines are forwarded as Tauri events mid-read. ~30–50 ms overhead per call.

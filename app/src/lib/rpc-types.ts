@@ -156,6 +156,7 @@ export interface AppSettings {
   externalMergeEnabled: boolean;
   externalMergePath: string;
   externalMergeArgs: string;
+  checkForUpdatesOnStartup: boolean;
 }
 
 export interface ExtractDiffFilesResult {

@@ -4,10 +4,13 @@
   import { invoke } from "@tauri-apps/api/core";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
+  import { check, type Update } from "@tauri-apps/plugin-updater";
+  import { restart } from "@tauri-apps/plugin-process";
   import Toolbar from "$lib/Toolbar.svelte";
   import CommitList from "$lib/CommitList.svelte";
   import PickQueue from "$lib/PickQueue.svelte";
   import ResultBanner from "$lib/ResultBanner.svelte";
+  import UpdateBanner from "$lib/UpdateBanner.svelte";
   import CommitDetailPanel from "$lib/CommitDetail.svelte";
   import CommitFilesPanel from "$lib/CommitFiles.svelte";
   import ConflictResolver from "$lib/ConflictResolver.svelte";
@@ -19,9 +22,13 @@
     maxCommits: 100, defaultApplyMode: "apply", showEolMarkers: false, autoFetchOnOpen: false, theme: "dark",
     externalDiffEnabled: false, externalDiffPath: "", externalDiffArgs: "",
     externalMergeEnabled: false, externalMergePath: "", externalMergeArgs: "",
+    checkForUpdatesOnStartup: true,
   };
   let settings = $state<AppSettings>(DEFAULT_SETTINGS);
   let settingsOpen = $state(false);
+  let pendingUpdate = $state<Update | null>(null);
+  let updateDownloading = $state(false);
+  let updateProgress = $state(0);
   let consoleOpen = $state(false);
   let consoleHeight = $state(180);
 
@@ -40,7 +47,30 @@
     window.addEventListener("mouseup", onUp);
   }
 
-  rpc.settings.load().then(s => { settings = s; }).catch(() => {});
+  rpc.settings.load().then(s => {
+    settings = s;
+    if (s.checkForUpdatesOnStartup) {
+      check().then(u => { if (u) pendingUpdate = u; }).catch(() => {});
+    }
+  }).catch(() => {});
+
+  async function installUpdate() {
+    if (!pendingUpdate) return;
+    updateDownloading = true;
+    updateProgress = 0;
+    await pendingUpdate.downloadAndInstall((event) => {
+      if (event.event === "Progress" && event.data.contentLength) {
+        updateProgress = (event.data.chunkLength / event.data.contentLength) * 100;
+      }
+    });
+    await restart();
+  }
+
+  async function checkForUpdates() {
+    const u = await check().catch(() => null);
+    if (u) pendingUpdate = u;
+    return !!u;
+  }
 
   $effect(() => {
     document.body.classList.toggle("light", settings.theme === "light");
@@ -597,6 +627,15 @@
 
 <div class="app">
   <Toolbar {repoPath} {currentBranch} {recentRepos} {consoleOpen} onopen={openRepo} onsettings={() => (settingsOpen = true)} onconsole={() => (consoleOpen = !consoleOpen)} />
+  {#if pendingUpdate}
+    <UpdateBanner
+      version={pendingUpdate.version}
+      downloading={updateDownloading}
+      progress={updateProgress}
+      onupdate={installUpdate}
+      ondismiss={() => (pendingUpdate = null)}
+    />
+  {/if}
 
   {#if repoPath}
     <div class="workspace">
@@ -694,6 +733,7 @@
       {settings}
       onclose={() => (settingsOpen = false)}
       onsave={saveSettings}
+      onchecknow={checkForUpdates}
     />
   {/if}
 </div>

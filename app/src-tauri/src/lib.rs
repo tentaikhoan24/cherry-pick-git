@@ -226,6 +226,7 @@ fn git_log_clear(app: tauri::AppHandle) -> Result<(), String> {
 
 fn default_max_commits() -> u32 { 100 }
 fn default_apply_mode() -> String { "apply".to_string() }
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
@@ -251,6 +252,8 @@ struct AppSettings {
     external_merge_path: String,
     #[serde(rename = "externalMergeArgs", default)]
     external_merge_args: String,
+    #[serde(rename = "checkForUpdatesOnStartup", default = "default_true")]
+    check_for_updates_on_startup: bool,
 }
 
 fn default_theme() -> String { "dark".to_string() }
@@ -269,6 +272,7 @@ impl Default for AppSettings {
             external_merge_enabled: false,
             external_merge_path: String::new(),
             external_merge_args: String::new(),
+            check_for_updates_on_startup: true,
         }
     }
 }
@@ -403,6 +407,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
             sidecar_cancel,
